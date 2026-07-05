@@ -1,7 +1,12 @@
 # Pin a specific reanalysis model (ERA5-Land→ERA5), not Open-Meteo `best_match`
 
-Weather is fetched from Open-Meteo pinned to a **fixed** model — ERA5-Land (~9 km) where
-available, falling back to ERA5 (~25 km) — rather than the API's default `best_match`.
+Weather is fetched from Open-Meteo pinned to **fixed** models — ERA5-Land (~9 km) and ERA5
+(~25 km) — rather than the API's default `best_match`.
+
+**Field split (found by probing the live API):** ERA5-Land only carries temperature and
+relative humidity; wind, cloud cover, and surface pressure are null there and come from
+ERA5. The client fetches both models and merges per field — ERA5-Land where present, ERA5
+otherwise — so temperature/humidity get the finer grid without losing the other fields.
 
 `best_match` chooses a model per location/date and that choice can change over time, so
 re-running an old activity could return different weather and silently shift a historical
