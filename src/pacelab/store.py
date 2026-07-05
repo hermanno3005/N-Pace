@@ -1,0 +1,101 @@
+"""SQLite system of record for activity results (FR-9.1, FR-10.1/10.2).
+
+One row per activity plus its per-segment rows (needed by Phase-3 calibration, ADR-0006).
+Each activity is stamped with the model version so re-runs are idempotent — the same
+version skips, a bumped version recomputes and replaces.
+"""
+
+import sqlite3
+from pathlib import Path
+
+from pacelab.analyze import ActivityResult, SegmentResult
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS activities (
+    activity_id   TEXT PRIMARY KEY,
+    distance_m    REAL,
+    observed_pace REAL,
+    np_pace       REAL,
+    cost_grade    REAL,
+    cost_heat     REAL,
+    cost_wind     REAL,
+    model_version TEXT
+);
+CREATE TABLE IF NOT EXISTS segments (
+    activity_id   TEXT,
+    idx           INTEGER,
+    distance      REAL,
+    grade         REAL,
+    elapsed       REAL,
+    temperature_c REAL,
+    humidity_pct  REAL,
+    wind_speed_ms REAL,
+    wind_dir_deg  REAL,
+    p_grade       REAL,
+    p_heat        REAL,
+    p_wind        REAL,
+    pace_obs      REAL,
+    pace_np       REAL,
+    stopped       INTEGER,
+    PRIMARY KEY (activity_id, idx)
+);
+"""
+
+
+class ResultStore:
+    def __init__(self, db_path: Path):
+        self._path = str(db_path)
+        with self._connect() as conn:
+            conn.executescript(_SCHEMA)
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self._path)
+
+    def save(self, activity_id: str, result: ActivityResult, model_version: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM activities WHERE activity_id = ?", (activity_id,))
+            conn.execute("DELETE FROM segments WHERE activity_id = ?", (activity_id,))
+            conn.execute(
+                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?)",
+                (activity_id, result.distance_m, result.observed_pace, result.np_pace,
+                 result.cost_grade, result.cost_heat, result.cost_wind, model_version),
+            )
+            conn.executemany(
+                "INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (activity_id, s.idx, s.distance, s.grade, s.elapsed, s.temperature_c,
+                     s.humidity_pct, s.wind_speed_ms, s.wind_dir_deg, s.p_grade, s.p_heat,
+                     s.p_wind, s.pace_obs, s.pace_np, int(s.stopped))
+                    for s in result.segments
+                ],
+            )
+
+    def is_current(self, activity_id: str, model_version: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT model_version FROM activities WHERE activity_id = ?", (activity_id,)
+            ).fetchone()
+        return row is not None and row[0] == model_version
+
+    def load(self, activity_id: str) -> ActivityResult | None:
+        with self._connect() as conn:
+            act = conn.execute(
+                "SELECT distance_m, observed_pace, np_pace, cost_grade, cost_heat, cost_wind "
+                "FROM activities WHERE activity_id = ?", (activity_id,)
+            ).fetchone()
+            if act is None:
+                return None
+            rows = conn.execute(
+                "SELECT idx, distance, grade, elapsed, temperature_c, humidity_pct, "
+                "wind_speed_ms, wind_dir_deg, p_grade, p_heat, p_wind, pace_obs, pace_np, "
+                "stopped FROM segments WHERE activity_id = ? ORDER BY idx", (activity_id,)
+            ).fetchall()
+        segments = [
+            SegmentResult(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9],
+                          r[10], r[11], r[12], bool(r[13]))
+            for r in rows
+        ]
+        return ActivityResult(
+            observed_pace=act[1], np_pace=act[2], cost_grade=act[3], cost_heat=act[4],
+            cost_wind=act[5], distance_m=act[0], segments=segments,
+        )

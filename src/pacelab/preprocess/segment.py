@@ -96,8 +96,11 @@ def segment_track(track: Track, step_m: float = 100.0, stop_speed_ms: float = ST
         distance = d1 - d0
         grade = (ele1 - ele0) / distance if distance > 0 else 0.0
         # Subtract paused time inside this window so the segment's pace is moving pace.
-        pause_time = sum(dt for pos, dt in pauses if d0 <= pos < d1)
-        moving_elapsed = (t1 - t0) - pause_time
+        # Clamp to the wall-clock span: a pause edge straddling the window boundary must
+        # not subtract more time than the segment actually took.
+        wall = t1 - t0
+        pause_time = min(sum(dt for pos, dt in pauses if d0 <= pos < d1), wall)
+        moving_elapsed = wall - pause_time
         segments.append(
             Segment(
                 distance=distance,
