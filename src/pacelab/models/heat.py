@@ -1,0 +1,44 @@
+"""Heat model — Heat Index → pace penalty (FR-5, ADR-0001).
+
+The stress index is the NWS Heat Index (air temperature + relative humidity, wind excluded
+per ADR-0001), which reduces to air temperature in cool/dry conditions and rises above it
+when muggy. It is mapped to a pace penalty by a power-law anchored to the El Helou/Ely
+temperature-vs-performance curve, zero at or below the 10 °C reference (ADR-0002).
+
+Coefficients are provisional defaults (like grade's k_grade) — tunable, and to be grounded
+against the heat-performance literature / personal calibration (ADR-0006).
+"""
+
+import math
+
+from pacelab.weather.conditions import Conditions
+
+REFERENCE_TEMP_C = 10.0  # ADR-0002; heat penalty is zero at/below this
+DEFAULT_HEAT_A = 0.0018  # scale of the power-law
+DEFAULT_HEAT_B = 1.5  # curvature (>1 = accelerating with heat, per FR-5.2)
+
+
+def heat_index_c(temp_c: float, rh_pct: float) -> float:
+    """NWS Heat Index in °C from air temperature (°C) and relative humidity (%)."""
+    t = temp_c * 9 / 5 + 32  # to °F
+    # Steadman simple estimate; only escalate to the full regression when it runs hot.
+    hi = (0.5 * (t + 61.0 + (t - 68.0) * 1.2 + rh_pct * 0.094) + t) / 2
+    if hi >= 80.0:
+        hi = (
+            -42.379 + 2.04901523 * t + 10.14333127 * rh_pct
+            - 0.22475541 * t * rh_pct - 6.83783e-3 * t * t
+            - 5.481717e-2 * rh_pct * rh_pct + 1.22874e-3 * t * t * rh_pct
+            + 8.5282e-4 * t * rh_pct * rh_pct - 1.99e-6 * t * t * rh_pct * rh_pct
+        )
+        if rh_pct < 13 and 80 <= t <= 112:
+            hi -= ((13 - rh_pct) / 4) * math.sqrt((17 - abs(t - 95)) / 17)
+        elif rh_pct > 85 and 80 <= t <= 87:
+            hi += ((rh_pct - 85) / 10) * ((87 - t) / 5)
+    return (hi - 32) * 5 / 9  # back to °C
+
+
+def heat_penalty(conditions: Conditions, ref_temp_c: float = REFERENCE_TEMP_C,
+                 a: float = DEFAULT_HEAT_A, b: float = DEFAULT_HEAT_B) -> float:
+    """Fractional pace penalty from heat stress; 0 at or below the reference temperature."""
+    hi = heat_index_c(conditions.temperature_c, conditions.humidity_pct)
+    return a * max(0.0, hi - ref_temp_c) ** b

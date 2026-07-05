@@ -64,7 +64,7 @@ Single technical user (Python-literate, data-comfortable). No GUI required; tabu
 
 ### 2.5 Assumptions & dependencies
 - **A-1** Per-point GPS lat/lon, elevation, and timestamp are obtainable per activity. *Open question: COROS MCP may expose only workout-level summaries; raw track likely needs FIT export (COROS app / Strava). See D-2.*
-- **A-2** Barometric altitude (COROS) is more reliable than GPS altitude; still requires smoothing.
+- **A-2** Altitude via GPS-Position.
 - **A-3** Open-Meteo provides hourly temp, RH, wind speed, wind direction, cloud cover, surface pressure at the activity's location/time; exact grid resolution to be confirmed (tens of km, coarse). See D-3.
 
 ---
