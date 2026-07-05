@@ -41,6 +41,26 @@ class StubService:
         return Conditions(20.0, 50.0, 0.0, 0.0, 0.0, 1013.0)
 
 
+def _write_trackless_gpx(path):
+    # A valid GPX with no trackpoints — e.g. a treadmill/strength activity (FR-1.4).
+    path.write_text('<?xml version="1.0"?>\n<gpx version="1.1" '
+                    'xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>'
+                    '</trkseg></trk></gpx>\n')
+
+
+def test_sync_skips_activities_with_no_gps_track(tmp_path):
+    empty = tmp_path / "empty.gpx"
+    _write_trackless_gpx(empty)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i900", "2024-07-01", "WeightTraining", "Gym")], empty)
+
+    outcomes = dict(sync(provider, StubService(), store, Config(), "2024-01-01", "2024-12-31",
+                         account_id="acct"))
+
+    assert outcomes["i900"] == "no-track"
+    assert store.load("i900", account_id="acct") is None  # not stored
+
+
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)

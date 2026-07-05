@@ -22,6 +22,10 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
             outcomes.append((ref.id, "no-file"))
             continue
         result = analyze_file(path, config, service)
+        if result.distance_m == 0:
+            # No usable GPS track — a treadmill run, strength session, etc. (FR-1.4).
+            outcomes.append((ref.id, "no-track"))
+            continue
         store.save(ref.id, result, config.model_version, account_id=account_id)
         outcomes.append((ref.id, "ok"))
     return outcomes

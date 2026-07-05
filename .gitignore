@@ -7,3 +7,7 @@ __pycache__/
 # runtime outputs
 *.db
 .cache/
+
+# local secrets — never commit
+.env
+.env.*
