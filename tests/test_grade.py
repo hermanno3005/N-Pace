@@ -1,4 +1,4 @@
-from pacelab.models.grade import grade_penalty
+from pacelab.models.grade import cost_of_transport, grade_penalty
 
 
 def test_flat_grade_has_zero_penalty():
@@ -30,7 +30,20 @@ def test_grade_is_capped_at_minetti_validity_bounds():
     assert grade_penalty(-0.60) == grade_penalty(-0.45)
 
 
-def test_ten_percent_climb_matches_literature_magnitude():
-    # Independent bracket: Minetti's cost at +10% grade is ~1.6–1.7× the flat cost.
-    ratio = grade_penalty(0.10) + 1.0
+def test_ten_percent_climb_matches_literature_energy_cost():
+    # Independent bracket: Minetti's *energy* cost at +10% grade is ~1.6–1.7× flat.
+    ratio = cost_of_transport(0.10) / cost_of_transport(0.0)
     assert 1.55 < ratio < 1.75
+
+
+def test_default_sensitivity_dampens_grade_toward_empirical_gap():
+    # FR-4.3/NFR-1: the pure Minetti energy ratio (v ∝ 1/C) over-corrects real running
+    # pace ~2×, so the default grade sensitivity dampens a 6% climb from ~+37% to the
+    # empirical-GAP neighbourhood (~+13–20%).
+    assert 0.13 < grade_penalty(0.06) < 0.20
+
+
+def test_full_sensitivity_recovers_pure_minetti():
+    # k_grade = 1.0 is the undamped constant-power model — pace penalty == energy ratio − 1.
+    undamped = cost_of_transport(0.06) / cost_of_transport(0.0) - 1.0
+    assert grade_penalty(0.06, k_grade=1.0) == undamped
