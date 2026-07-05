@@ -34,3 +34,18 @@ def test_recompute_replaces_rather_than_duplicates(tmp_path):
     loaded = store.load("act1")
     assert len(loaded.segments) == 2  # not 4
     assert store.is_current("act1", "0.2.0")
+
+
+def test_results_are_isolated_by_account(tmp_path):
+    # ADR-0009: the same activity id under two accounts must not collide.
+    store = ResultStore(tmp_path / "pacelab.db")
+    alice = make_result()
+    bob = ActivityResult(observed_pace=400.0, np_pace=395.0, cost_grade=0.0,
+                         cost_heat=0.0, cost_wind=0.0, distance_m=100.0, segments=[])
+    store.save("i100", alice, model_version="0.1.0", account_id="alice")
+    store.save("i100", bob, model_version="0.1.0", account_id="bob")
+
+    assert store.load("i100", account_id="alice") == alice
+    assert store.load("i100", account_id="bob") == bob
+    assert store.is_current("i100", "0.1.0", account_id="alice")
+    assert not store.is_current("i100", "0.1.0", account_id="carol")
