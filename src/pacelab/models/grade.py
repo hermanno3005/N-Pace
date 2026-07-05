@@ -17,7 +17,10 @@ GRADE_CAP = 0.45
 # (v ∝ 1/C) is an upper bound: real runners hold something between constant power and
 # constant pace on hills, so their pace is less grade-sensitive than the raw energy ratio.
 # This dampens the penalty toward empirical GAP; ADR-0006 calibration personalises it.
-DEFAULT_GRADE_SENSITIVITY = 0.45
+# Default 0.40 = least-squares fit to published GAP over 0–10% uphill (implied-k band
+# 0.38–0.44); see docs/research/grade-adjusted-pace.md and ADR-0007. NB: the scalar fits
+# uphill only — downhill is over-credited past ~−15% (constant-power shape breaks down).
+DEFAULT_GRADE_SENSITIVITY = 0.40
 
 _C0 = _MINETTI[-1]  # cost on the flat, C(0) = 3.6 J/kg/m
 
