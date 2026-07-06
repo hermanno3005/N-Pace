@@ -13,3 +13,11 @@ athletes and against cool race conditions.
 
 Home altitude (not sea level) is the reference so that running at home in still air incurs
 no spurious air-density penalty; the home-elevation value lives in config.
+
+## Amendment (v0.2, ADR-0010)
+
+The reference gains **no solar radiation** (shade). WBGT depends on solar load, so the
+reference needs a solar value to define the heat-penalty zero-point; "no sun" is also the
+right meaning — an ideal cool race day isn't run in blazing sun. This extends the frozen set
+without changing any existing term; WBGT_ref is then the WBGT at 10 °C / 50% RH / no wind /
+no sun.

@@ -16,6 +16,10 @@ same kind of thing:
 - **Wind** feeds two models: drag (inside `p_mech`) and convective cooling (which *reduces*
   `p_heat`). The cooling coupling coefficient starts at 0 in v0.1 and is enabled in v0.2.
 
+> **Update (v0.2, ADR-0010):** the wind→heat coupling is no longer a separate coefficient.
+> Adopting WBGT as the heat-stress index makes it *intrinsic* — WBGT's wet-bulb term falls
+> as wind rises, so wind cooling is baked into the index. There is nothing to tune.
+
 ## Considered options
 
 - **Uniform additive** (`1 + p_g + p_h + p_w`, the SRS's original lean) — under-counts

@@ -88,10 +88,18 @@ everything. Keep the two distinct in output — NP is never the whole decomposit
 _Avoid_: correction, penalty (when the aggregate is meant).
 
 **Heat-Stress Index**:
-The scalar fed into the heat penalty curve — in v1, **Heat Index** (from air temperature and
-relative humidity, wind excluded). Distinct from the penalty itself: the index measures the
-environment, the curve maps it to a slowing. v0.2 target: WBGT.
-_Avoid_: feels-like, apparent temperature (that's the wind-inclusive v0.2 variant).
+The scalar fed into the heat penalty curve. Distinct from the penalty itself: the index
+measures the environment, the curve maps it to a slowing. v0.2 uses **WBGT** (below); v1
+used the **Heat Index** (air temperature + humidity, no wind/sun), now the fallback when
+solar data is unavailable.
+_Avoid_: feels-like, apparent temperature.
+
+**WBGT** (Wet-Bulb Globe Temperature):
+The v0.2 heat-stress index, computed from air temperature, humidity, **wind**, and **solar
+radiation** by a closed-form approximation (ADR-0010). Because its wet-bulb term falls as
+wind rises, wind cooling is *intrinsic* to it — the "wind→heat coupling" is not a separate
+knob but a property of this index. Solar load raises it.
+_Avoid_: heat index (that's the v1 fallback), feels-like.
 
 **Headwind Component**:
 The signed projection of the wind vector onto a segment's bearing: positive against the
@@ -106,6 +114,6 @@ _Avoid_: split, lap, interval (those are athlete-facing groupings, not the model
 
 **Reference Conditions**:
 The frozen baseline NP normalizes to, at which every pace penalty is zero by definition:
-**0% grade, 10 °C, 50% RH, no wind, home altitude**. Chosen so NP reads as "equivalent
-ideal cool-weather pace." Frozen — see ADR-0002.
+**0% grade, 10 °C, 50% RH, no wind, no sun, home altitude**. Chosen so NP reads as
+"equivalent ideal cool-weather pace." Frozen — see ADR-0002 (no-sun added in v0.2 for WBGT).
 _Avoid_: ideal conditions, baseline (unqualified).
