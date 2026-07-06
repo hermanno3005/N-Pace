@@ -11,11 +11,18 @@ against the heat-performance literature / personal calibration (ADR-0006).
 
 import math
 
+from pacelab.models.wbgt import wbgt
 from pacelab.weather.conditions import Conditions
 
 REFERENCE_TEMP_C = 10.0  # ADR-0002; heat penalty is zero at/below this
-DEFAULT_HEAT_A = 0.0018  # scale of the power-law
-DEFAULT_HEAT_B = 1.5  # curvature (>1 = accelerating with heat, per FR-5.2)
+DEFAULT_HEAT_A = 0.0018  # Heat Index (v1 / fallback) power-law scale
+DEFAULT_HEAT_B = 1.5  # Heat Index curvature
+
+# WBGT curve (v0.2, ADR-0010): reference and coefficients grounded in
+# docs/research/wbgt-heat-model.md. Provisional pending ADR-0006 calibration.
+WBGT_REF_C = 7.2
+DEFAULT_WBGT_A = 0.0007
+DEFAULT_WBGT_B = 2.0  # El Helou's fit is explicitly quadratic
 
 
 def heat_index_c(temp_c: float, rh_pct: float) -> float:
@@ -37,8 +44,16 @@ def heat_index_c(temp_c: float, rh_pct: float) -> float:
     return (hi - 32) * 5 / 9  # back to °C
 
 
-def heat_penalty(conditions: Conditions, ref_temp_c: float = REFERENCE_TEMP_C,
-                 a: float = DEFAULT_HEAT_A, b: float = DEFAULT_HEAT_B) -> float:
-    """Fractional pace penalty from heat stress; 0 at or below the reference temperature."""
-    hi = heat_index_c(conditions.temperature_c, conditions.humidity_pct)
-    return a * max(0.0, hi - ref_temp_c) ** b
+def heat_penalty(conditions: Conditions, *,
+                 wbgt_ref_c: float = WBGT_REF_C, wbgt_a: float = DEFAULT_WBGT_A,
+                 wbgt_b: float = DEFAULT_WBGT_B, hi_ref_c: float = REFERENCE_TEMP_C,
+                 hi_a: float = DEFAULT_HEAT_A, hi_b: float = DEFAULT_HEAT_B) -> float:
+    """Fractional pace penalty from heat stress; 0 at or below the reference.
+
+    Primary: WBGT (ADR-0010), which folds in wind cooling and solar load. When no solar
+    data is available (`solar_radiation_wm2 is None`) it falls back to the v1 Heat Index.
+    """
+    if conditions.solar_radiation_wm2 is None:
+        hi = heat_index_c(conditions.temperature_c, conditions.humidity_pct)
+        return hi_a * max(0.0, hi - hi_ref_c) ** hi_b
+    return wbgt_a * max(0.0, wbgt(conditions) - wbgt_ref_c) ** wbgt_b

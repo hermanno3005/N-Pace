@@ -65,8 +65,8 @@ def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)
     store = ResultStore(tmp_path / "db")
-    # i100 is already current; i200 is new.
-    store.save("i100", ActivityResult(0, 0, 0, 0, 0, 0, []), "0.1.0", account_id="acct")
+    # i100 is already current (under the current model version); i200 is new.
+    store.save("i100", ActivityResult(0, 0, 0, 0, 0, 0, []), Config().model_version, account_id="acct")
     provider = StubProvider(
         [ActivityRef("i100", "2024-07-01", "Run", "A"), ActivityRef("i200", "2024-07-02", "Run", "B")],
         gpx,
@@ -78,4 +78,4 @@ def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     assert provider.downloaded == ["i200"]  # current one never downloaded (rate-limit friendly)
     assert outcomes["i100"] == "skip"
     assert outcomes["i200"] == "ok"
-    assert store.is_current("i200", "0.1.0", account_id="acct")
+    assert store.is_current("i200", Config().model_version, account_id="acct")

@@ -58,8 +58,23 @@ fall back to the v1 **Heat Index**, confidence-tagged — both stay behind the o
 `heat_penalty(conditions)` interface. Switching the index is a model change, so
 **`model_version` → 0.2.0**; the store's idempotency recomputes history under WBGT (FR-10.2).
 
+## Implementation note (globe term)
+
+The **natural-wet-bulb** (0.7 weight) uses the NDFD regression verbatim — this is where the
+wind cooling and solar response live. The **globe** term (0.2 weight) does *not* use the full
+Dimiceli heat balance: that needs solar zenith angle, a direct/diffuse split, and an
+unpublished coefficient `h`, none cleanly available from Open-Meteo's `shortwave_radiation`.
+Instead the globe uses a **shade-anchored simplification** `Tg = Ta + 0.0096·S` (Carter et al.
+2020 solar slope; `Tg = Ta` in shade), which keeps `WBGT_ref = 7.2 °C` exactly consistent with
+the analytic derivation and preserves the wind↓/solar↑ behaviour (the coupling is carried by
+the 0.7-weighted `Tnw`). Reasonable given the globe's low weight and the sun-double-count
+caveat; revisit if calibration shows the solar term is off.
+
 ## Consequences
 
 - Amends ADR-0002 (reference gains "no solar radiation") and supersedes ADR-0001's deferred
   wind→heat coefficient (now intrinsic).
-- Adds one fetched weather variable and a WBGT computation; removes `cloud_cover` from heat.
+- Adds one fetched weather variable and a WBGT computation. `cloud_cover` is unused by heat
+  but stays on the fetch (harmless; removing it would reorder the `Conditions` record).
+- Heat penalty routes on `solar_radiation_wm2`: a value → WBGT, `None` → Heat Index fallback.
+  Bumps `model_version` to 0.2.0, so stored history recomputes under WBGT (FR-10.2).
