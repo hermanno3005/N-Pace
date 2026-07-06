@@ -37,6 +37,29 @@ ordered stream of trackpoints is the **track**. Every input source (FIT, GPX, an
 adapter that must yield this record, or it cannot feed the grade and wind models.
 _Avoid_: fix, sample, waypoint.
 
+**Source Adapter**:
+Parses one activity *file* (FIT, GPX) into a track. Knows file formats, never the network.
+_Avoid_: parser, reader, loader.
+
+**Provider**:
+A remote platform PaceLab fetches activities from (v1: intervals.icu). Distinct from a
+Source Adapter: a Provider *lists* activities and *downloads* their original files by id; it
+knows the network and credentials, never file formats. It downloads into the FIT cache, then
+Source Adapters take over. Scoped to one **Account** (credentials injected), so multiple
+users are multiple Providers, not a rewrite.
+_Avoid_: client, connector, integration (when the role is meant).
+
+**Activity Reference**:
+The lightweight identity of a remote activity from a Provider's listing — its id, date, and
+type — before its file is downloaded. Distinct from the full Activity.
+_Avoid_: stub, summary, header.
+
+**Account**:
+One athlete's credentials and identity on a Provider (an API key + athlete id). The unit of
+scoping for storage and cache: every stored result and cached file belongs to an Account.
+v1 has exactly one; the seam keeps additional ones data, not a redesign.
+_Avoid_: user, profile, login.
+
 ### The cost model
 
 **Pace Penalty**:
