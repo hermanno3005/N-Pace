@@ -73,10 +73,14 @@ def segment_track(track: Track, step_m: float = 100.0, stop_speed_ms: float = ST
     cum = _cumulative_distances(points)
     total = cum[-1]
 
-    # Boundary distances: 0, step, 2·step, …, total (final segment may be shorter).
+    # Boundary distances: 0, step, 2·step, …, total. A trailing remainder shorter than
+    # half a step merges into the previous segment — over a few metres, baro noise turns
+    # grade into garbage (observed: +146 grade on a 3.7 m sliver).
     boundaries = [0.0]
     while boundaries[-1] + step_m < total:
         boundaries.append(boundaries[-1] + step_m)
+    if len(boundaries) > 1 and total - boundaries[-1] < step_m / 2:
+        boundaries.pop()
     boundaries.append(total)
 
     # Pauses are detected on the raw edges (not on diluted segment averages): an edge
@@ -101,6 +105,7 @@ def segment_track(track: Track, step_m: float = 100.0, stop_speed_ms: float = ST
         wall = t1 - t0
         pause_time = min(sum(dt for pos, dt in pauses if d0 <= pos < d1), wall)
         moving_elapsed = wall - pause_time
+        hrs = [p.hr for p, d in zip(points, cum) if d0 <= d < d1 and p.hr is not None]
         segments.append(
             Segment(
                 distance=distance,
@@ -111,6 +116,7 @@ def segment_track(track: Track, step_m: float = 100.0, stop_speed_ms: float = ST
                 lon=lonm,
                 start_time=t0,
                 stopped=pause_time > 0,
+                hr=sum(hrs) / len(hrs) if hrs else None,
             )
         )
     return segments

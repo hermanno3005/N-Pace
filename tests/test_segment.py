@@ -72,6 +72,24 @@ def test_normal_running_is_never_flagged_as_stopped():
     assert not any(s.stopped for s in segs)
 
 
+def test_segments_carry_mean_heart_rate():
+    # HR feeds calibration (steadiness detection, effort cross-check); a segment's hr is
+    # the mean of the raw points inside its distance window.
+    lat = 48.0
+    lon_step = 30 / (111_320 * math.cos(math.radians(lat)))
+    pts = [Trackpoint(t=i * 10.0, lat=lat, lon=i * lon_step, ele=100.0, hr=140 + i)
+           for i in range(10)]
+    segs = segment_track(Track(points=pts), step_m=100)
+    assert segs[0].hr is not None
+    assert 140 <= segs[0].hr <= 144  # mean of the first ~4 points
+    assert segs[-1].hr > segs[0].hr  # rising HR visible across segments
+
+
+def test_segments_without_hr_data_have_none():
+    segs = segment_track(straight_east_track(n=10, spacing_m=30), step_m=100)
+    assert all(s.hr is None for s in segs)
+
+
 def test_segmentation_conserves_distance():
     # Resampling a track into segments must not lose or invent length: the segment
     # distances sum to the raw polyline length.
@@ -81,4 +99,15 @@ def test_segmentation_conserves_distance():
         for a, b in zip(track.points, track.points[1:])
     )
     segs = segment_track(track, step_m=100)
+    assert sum(s.distance for s in segs) == pytest.approx(raw_len, rel=1e-6)
+
+
+def test_tiny_final_remainder_merges_into_the_previous_segment():
+    # A trailing 30 m sliver gets garbage grade from baro noise over a few metres —
+    # remainders under half a step merge into the last full segment instead.
+    track = straight_east_track(n=24, spacing_m=10)  # ~230 m
+    raw_len = sum(haversine(a.lat, a.lon, b.lat, b.lon)
+                  for a, b in zip(track.points, track.points[1:]))
+    segs = segment_track(track, step_m=100)
+    assert [round(s.distance) for s in segs] == [100, 130]
     assert sum(s.distance for s in segs) == pytest.approx(raw_len, rel=1e-6)

@@ -158,6 +158,35 @@ def _run_trend(args) -> int:
     return 0
 
 
+def _run_calibrate(args) -> int:
+    from pacelab.calibrate import fit_k_grade, fit_wbgt_a, is_steady
+    from pacelab.models.grade import DEFAULT_GRADE_SENSITIVITY
+    from pacelab.models.heat import DEFAULT_WBGT_A
+
+    account_id = Account.from_env().storage_id
+    store = ResultStore(args.db)
+    results = [store.load(p.activity_id, account_id=account_id)
+               for p in store.np_trend(account_id=account_id)]
+    steady = sum(1 for r in results if r and is_steady(r))
+    print(f"{len(results)} analysed runs · {steady} steady (calibration input)\n")
+
+    k = fit_k_grade(results)
+    if k is None:
+        print(f"k_grade : insufficient data — keeping default {DEFAULT_GRADE_SENSITIVITY}")
+    else:
+        print(f"k_grade : {k.value:.3f}   (default {DEFAULT_GRADE_SENSITIVITY}; "
+              f"IQR ±{k.spread / 2:.3f} over {k.n_runs} hilly steady runs)")
+
+    a = fit_wbgt_a(results, k_grade=k.value if k else DEFAULT_GRADE_SENSITIVITY)
+    if a is None:
+        print(f"wbgt_a  : insufficient data/spread — keeping default {DEFAULT_WBGT_A}")
+    else:
+        print(f"wbgt_a  : {a.value:.5f} (default {DEFAULT_WBGT_A}; R²={a.r2:.2f}, "
+              f"residual ±{a.spread:.1f} s/km over {a.n_runs} steady runs)")
+    print("\nreport only — nothing applied (FR-8.2). Review before tuning config.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pacelab", description="Environment-adjusted pace engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     trend_p = sub.add_parser("trend", help="NP over time — fitness with conditions stripped out")
     trend_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
 
+    cal_p = sub.add_parser("calibrate", help="fit personal coefficients (report only)")
+    cal_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
+
     args = parser.parse_args(argv)
     if args.command == "sync":
         return _run_sync(args)
@@ -201,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_watch(args)
     if args.command == "trend":
         return _run_trend(args)
+    if args.command == "calibrate":
+        return _run_calibrate(args)
     return _run_analyze(args)
 
 

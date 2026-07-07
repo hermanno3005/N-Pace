@@ -81,6 +81,15 @@ def test_opening_a_v01_database_migrates_it(tmp_path):
     assert store.load("new1") == make_result()
 
 
+def test_segment_heart_rate_round_trips(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+    seg = SegmentResult(0, 100.0, 0.0, 30.0, 20.0, 50.0, 2.0, 180.0, 0.0, 0.01, 0.0,
+                        300.0, 297.0, False, 650.0, avg_hr=152.5)
+    result = ActivityResult(300.0, 297.0, 0.0, 3.0, 0.0, 100.0, [seg])
+    store.save("hr", result, model_version="0.2.0")
+    assert store.load("hr").segments[0].avg_hr == 152.5
+
+
 def test_segment_solar_radiation_round_trips(tmp_path):
     # Per-segment solar is persisted (ADR-0006: per-segment conditions); NULL marks the
     # Heat Index fallback (ADR-0010's confidence tag).

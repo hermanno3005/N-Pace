@@ -84,3 +84,21 @@ def test_disk_cache_survives_a_new_service(tmp_path):
     cond = svc.conditions_at(48.0, 11.0, 1800.0)
 
     assert cond.temperature_c == pytest.approx(0.5)  # interpolated between hour 0 and 1
+
+
+def test_stale_cache_format_is_refetched(tmp_path):
+    # Cache files written before the solar field existed (7 values per row) must be
+    # refreshed, not served — they silently starve WBGT into the Heat Index fallback.
+    import json
+
+    sunny = [(h * 3600.0, Conditions(float(h), 50.0, 2.0, 180.0, 0.0, 1013.0, 100.0))
+             for h in range(24)]
+    fetcher = StubFetcher(sunny)
+    svc = WeatherService(fetcher, cache_dir=tmp_path)
+    stale = [[h * 3600.0, float(h), 50.0, 2.0, 180.0, 0.0, 1013.0] for h in range(24)]
+    (tmp_path / "48.0_11.0_1970-01-01.json").write_text(json.dumps(stale))
+
+    cond = svc.conditions_at(48.0, 11.0, 1800.0)
+
+    assert fetcher.calls == 1  # refetched despite the cache file
+    assert cond.solar_radiation_wm2 is not None
