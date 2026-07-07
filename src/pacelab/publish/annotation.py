@@ -29,11 +29,10 @@ def render_annotation(result: ActivityResult, provisional: bool = False) -> str:
     )
 
 
-def splice_annotation(description: str | None, block: str) -> str:
-    """Merge the annotation into a description: replace our old block, or append.
+def strip_annotation(description: str | None) -> str:
+    """The description with PaceLab's block removed — the athlete's own text only.
 
-    The PaceLab block is the marker line plus the line after it. Everything else in the
-    description belongs to the athlete and passes through untouched.
+    The PaceLab block is the marker line plus the line after it.
     """
     lines = (description or "").splitlines()
     kept: list[str] = []
@@ -44,5 +43,14 @@ def splice_annotation(description: str | None, block: str) -> str:
             continue
         kept.append(lines[i])
         i += 1
-    own = "\n".join(kept).strip()
+    return "\n".join(kept).strip()
+
+
+def splice_annotation(description: str | None, block: str) -> str:
+    """Merge the annotation into a description: replace our old block, or append.
+
+    Everything that isn't PaceLab's block belongs to the athlete and passes through
+    untouched.
+    """
+    own = strip_annotation(description)
     return f"{own}\n\n{block}" if own else block

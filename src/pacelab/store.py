@@ -124,6 +124,13 @@ class ResultStore:
                 ],
             )
 
+    def delete(self, activity_id: str, account_id: str = "local") -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM activities WHERE account_id = ? AND activity_id = ?",
+                         (account_id, activity_id))
+            conn.execute("DELETE FROM segments WHERE account_id = ? AND activity_id = ?",
+                         (account_id, activity_id))
+
     def is_provisional(self, activity_id: str, account_id: str = "local") -> bool:
         """True when the stored result came from forecast-tier weather (ADR-0012)."""
         with self._connect() as conn:

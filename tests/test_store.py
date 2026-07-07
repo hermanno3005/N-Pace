@@ -104,6 +104,16 @@ def test_provisional_flag_round_trips_and_clears_on_final_save(tmp_path):
     assert not store.is_provisional("ghost", account_id="acct")  # unknown → not provisional
 
 
+def test_delete_removes_activity_and_segment_rows(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
+
+    store.delete("act1", account_id="acct")
+
+    assert store.load("act1", account_id="acct") is None
+    assert not store.is_current("act1", "0.2.0", account_id="acct")
+
+
 def test_publish_state_tracks_the_model_version(tmp_path):
     # An activity needs publishing until marked; a recompute (save) resets the mark so
     # sync republishes exactly when it reanalyses (ADR-0011).
