@@ -60,8 +60,15 @@ class WeatherService:
             return self._memory[key]
 
         path = self._dir / f"{key}.json"
+        cached = None
         if self._disk_cache and path.exists():
-            series = _decode(json.loads(path.read_text()))
+            rows = json.loads(path.read_text())
+            # Reject stale-format files (written before a Conditions field existed) —
+            # serving them would silently degrade models (e.g. WBGT → Heat Index).
+            if rows and len(rows[0]) == _ROW_FIELDS:
+                cached = _decode(rows)
+        if cached is not None:
+            series = cached
         else:
             series = self._fetcher.fetch_hourly(cell_lat, cell_lon, day)
             if not series:
@@ -76,13 +83,18 @@ class WeatherService:
         return series
 
 
+# Fields per encoded row: t + the 7 Conditions fields. Bump when Conditions grows so
+# stale cache files are refetched rather than served with missing fields.
+_ROW_FIELDS = 8
+
+
 def _encode(series: _HourlySeries) -> list:
     return [
         [t, c.temperature_c, c.humidity_pct, c.wind_speed_ms, c.wind_dir_deg,
-         c.cloud_cover_pct, c.pressure_hpa]
+         c.cloud_cover_pct, c.pressure_hpa, c.solar_radiation_wm2]
         for t, c in series
     ]
 
 
 def _decode(rows: list) -> _HourlySeries:
-    return [(r[0], Conditions(r[1], r[2], r[3], r[4], r[5], r[6])) for r in rows]
+    return [(r[0], Conditions(r[1], r[2], r[3], r[4], r[5], r[6], r[7])) for r in rows]
