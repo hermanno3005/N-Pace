@@ -23,10 +23,12 @@ def _write_gpx(path):
 
 
 class StubProvider:
-    def __init__(self, refs, gpx_path):
+    def __init__(self, refs, gpx_path, publish_fails=False):
         self._refs = refs
         self._gpx = gpx_path
         self.downloaded = []
+        self.descriptions = {}
+        self._publish_fails = publish_fails
 
     def list_activities(self, oldest, newest):
         return self._refs
@@ -34,6 +36,14 @@ class StubProvider:
     def download(self, activity_id):
         self.downloaded.append(activity_id)
         return self._gpx
+
+    def fetch_description(self, activity_id):
+        if self._publish_fails:
+            raise RuntimeError("intervals.icu down")
+        return self.descriptions.get(activity_id)
+
+    def update_description(self, activity_id, text):
+        self.descriptions[activity_id] = text
 
 
 class StubService:
@@ -94,3 +104,21 @@ def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     assert outcomes["i100"] == "skip"
     assert outcomes["i200"] == "ok"
     assert store.is_current("i200", Config().model_version, account_id="acct")
+    # Ambient publish (ADR-0011): the analysed run got its annotation written and marked.
+    assert "PaceLab" in provider.descriptions["i200"]
+    assert not store.needs_publish("i200", Config().model_version, account_id="acct")
+
+
+def test_publish_failure_does_not_fail_the_sync(tmp_path):
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i200", "2024-07-02", "Run", "B")], gpx,
+                            publish_fails=True)
+
+    outcomes = dict(sync(provider, StubService(), store, Config(), "2024-01-01", "2024-12-31",
+                         account_id="acct"))
+
+    assert outcomes["i200"] == "publish-failed"  # analysed and stored, annotation pending
+    assert store.is_current("i200", Config().model_version, account_id="acct")
+    assert store.needs_publish("i200", Config().model_version, account_id="acct")

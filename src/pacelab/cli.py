@@ -19,6 +19,7 @@ from pacelab.app import analyze_file
 from pacelab.config import Config
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
+from pacelab.publish.publisher import publish_range
 from pacelab.report import format_segments, format_summary, to_dict
 from pacelab.store import ResultStore
 from pacelab.sync import sync
@@ -98,6 +99,26 @@ def _run_sync(args) -> int:
     return 0
 
 
+def _run_publish(args) -> int:
+    config = Config()
+    account = Account.from_env()
+    provider = IntervalsProvider(account, UrllibHttp(), cache_dir=args.cache_dir / "activities")
+    store = ResultStore(args.db)
+
+    try:
+        outcomes = publish_range(provider, store, config, args.oldest, args.newest,
+                                 account_id=account.storage_id)
+    except RateLimited as e:
+        print(f"{e} — published annotations are saved; rerun to continue.", file=sys.stderr)
+        return 1
+
+    for activity_id, status in outcomes:
+        print(f"{status:14} {activity_id}")
+    published = sum(1 for _, s in outcomes if s == "published")
+    print(f"\npublished {published} / {len(outcomes)} listed")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pacelab", description="Environment-adjusted pace engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -111,8 +132,19 @@ def main(argv: list[str] | None = None) -> int:
     sync_p.add_argument("--to", dest="newest", default=date.today().isoformat(), help="newest date")
     _add_common(sync_p)
 
+    publish_p = sub.add_parser(
+        "publish", help="write annotations for already-analysed activities (backfill/re-publish)"
+    )
+    publish_p.add_argument("--from", dest="oldest", required=True, help="oldest date, YYYY-MM-DD")
+    publish_p.add_argument("--to", dest="newest", default=date.today().isoformat(), help="newest date")
+    _add_common(publish_p)
+
     args = parser.parse_args(argv)
-    return _run_sync(args) if args.command == "sync" else _run_analyze(args)
+    if args.command == "sync":
+        return _run_sync(args)
+    if args.command == "publish":
+        return _run_publish(args)
+    return _run_analyze(args)
 
 
 if __name__ == "__main__":

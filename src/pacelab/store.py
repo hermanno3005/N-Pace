@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS activities (
     cost_heat     REAL,
     cost_wind     REAL,
     model_version TEXT,
+    published_version TEXT,
     PRIMARY KEY (account_id, activity_id)
 );
 CREATE TABLE IF NOT EXISTS segments (
@@ -54,6 +55,14 @@ class ResultStore:
         with self._connect() as conn:
             self._migrate_v01(conn)
             conn.executescript(_SCHEMA)
+            self._migrate_add_columns(conn)
+
+    @staticmethod
+    def _migrate_add_columns(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after a table already existed (additive, no PK change)."""
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
+        if "published_version" not in columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN published_version TEXT")
 
     @staticmethod
     def _migrate_v01(conn: sqlite3.Connection) -> None:
@@ -73,7 +82,7 @@ class ResultStore:
             "ALTER TABLE activities RENAME TO activities_v01;"
             "ALTER TABLE segments RENAME TO segments_v01;"
             + _SCHEMA +
-            "INSERT INTO activities SELECT 'local', * FROM activities_v01;"
+            "INSERT INTO activities SELECT 'local', *, NULL FROM activities_v01;"
             "INSERT INTO segments SELECT 'local', s.*, NULL FROM segments_v01 s;"
             "DROP TABLE activities_v01;"
             "DROP TABLE segments_v01;"
@@ -89,8 +98,10 @@ class ResultStore:
                          (account_id, activity_id))
             conn.execute("DELETE FROM segments WHERE account_id = ? AND activity_id = ?",
                          (account_id, activity_id))
+            # published_version starts NULL — a recompute resets it, so sync republishes
+            # exactly when it reanalyses (ADR-0011).
             conn.execute(
-                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?,NULL)",
                 (account_id, activity_id, result.distance_m, result.observed_pace,
                  result.np_pace, result.cost_grade, result.cost_heat, result.cost_wind,
                  model_version),
@@ -104,6 +115,23 @@ class ResultStore:
                      s.solar_radiation_wm2)
                     for s in result.segments
                 ],
+            )
+
+    def needs_publish(self, activity_id: str, model_version: str, account_id: str = "local") -> bool:
+        """True when a stored result hasn't been annotated under this model version."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT published_version FROM activities WHERE account_id = ? AND activity_id = ?",
+                (account_id, activity_id),
+            ).fetchone()
+        return row is not None and row[0] != model_version
+
+    def mark_published(self, activity_id: str, model_version: str, account_id: str = "local") -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE activities SET published_version = ? "
+                "WHERE account_id = ? AND activity_id = ?",
+                (model_version, account_id, activity_id),
             )
 
     def is_current(self, activity_id: str, model_version: str, account_id: str = "local") -> bool:

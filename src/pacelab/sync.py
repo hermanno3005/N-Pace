@@ -7,6 +7,7 @@ hammering the remaining activities.
 
 from pacelab.app import analyze_file
 from pacelab.config import Config
+from pacelab.publish.publisher import try_publish
 from pacelab.store import ResultStore
 
 _PARSEABLE = {".fit", ".gpx"}
@@ -16,7 +17,9 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
          account_id: str, reprocess: bool = False) -> list[tuple[str, str]]:
     """Return per-activity outcomes, one of:
 
-    - ``"ok"`` — downloaded, analyzed, stored
+    - ``"ok"`` — downloaded, analyzed, stored, annotation published (ADR-0011)
+    - ``"publish-failed"`` — analyzed and stored, but the annotation write failed
+      (best-effort: retried by the next sync/publish run)
     - ``"skip"`` — already current in the store; not even downloaded
     - ``"no-file"`` — provider has no downloadable original (e.g. Strava-synced)
     - ``"no-track"`` — original has no usable GPS track (treadmill, strength; FR-1.4)
@@ -42,5 +45,6 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
             outcomes.append((ref.id, "no-track"))
             continue
         store.save(ref.id, result, config.model_version, account_id=account_id)
-        outcomes.append((ref.id, "ok"))
+        published = try_publish(provider, store, ref.id, config.model_version, account_id)
+        outcomes.append((ref.id, "ok" if published else "publish-failed"))
     return outcomes

@@ -92,6 +92,43 @@ def test_segment_solar_radiation_round_trips(tmp_path):
     assert store.load("sunny").segments[0].solar_radiation_wm2 == 650.0
 
 
+def test_publish_state_tracks_the_model_version(tmp_path):
+    # An activity needs publishing until marked; a recompute (save) resets the mark so
+    # sync republishes exactly when it reanalyses (ADR-0011).
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
+    assert store.needs_publish("act1", "0.2.0", account_id="acct")
+
+    store.mark_published("act1", "0.2.0", account_id="acct")
+    assert not store.needs_publish("act1", "0.2.0", account_id="acct")
+
+    store.save("act1", make_result(), model_version="0.3.0", account_id="acct")  # recompute
+    assert store.needs_publish("act1", "0.3.0", account_id="acct")
+
+
+def test_unknown_activity_does_not_need_publish(tmp_path):
+    # Nothing analysed → nothing to annotate.
+    store = ResultStore(tmp_path / "pacelab.db")
+    assert not store.needs_publish("ghost", "0.2.0", account_id="acct")
+
+
+def test_v02_database_without_publish_column_migrates(tmp_path):
+    # A db created before the published_version column must gain it transparently.
+    import sqlite3
+
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
+    conn = sqlite3.connect(tmp_path / "pacelab.db")
+    conn.executescript(
+        "ALTER TABLE activities DROP COLUMN published_version;"
+    )
+    conn.close()
+
+    reopened = ResultStore(tmp_path / "pacelab.db")
+    assert reopened.needs_publish("act1", "0.2.0", account_id="acct")
+    assert reopened.load("act1", account_id="acct") == make_result()
+
+
 def test_results_are_isolated_by_account(tmp_path):
     # ADR-0009: the same activity id under two accounts must not collide.
     store = ResultStore(tmp_path / "pacelab.db")
