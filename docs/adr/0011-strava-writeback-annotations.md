@@ -9,10 +9,11 @@
 > annotation to the **intervals.icu activity description only**, and the bridge carries it
 > to Strava. This deletes the OAuth machinery, token file, activity matching, and Strava
 > rate-limit handling designed below; that design is kept as the documented fallback if the
-> bridge breaks or a paid direct integration is ever wanted. One empirical caveat: edits
-> via the intervals.icu **API** (vs its UI) triggering the push is undocumented — verified
-> by a one-activity live test. Athlete-side setup: connect Strava in intervals.icu settings
-> and tick the checkbox.
+> bridge breaks or a paid direct integration is ever wanted. The one empirical caveat —
+> whether edits via the intervals.icu **API** (vs its UI) trigger the push — was **verified
+> live on 2026-07-07**: an annotation PUT to a Strava-linked activity's description appeared
+> on the Strava activity. Athlete-side setup: connect Strava in intervals.icu settings and
+> tick "Update Strava name and description".
 
 Each analysed run gets a public **annotation** — NP, observed pace, and the grade/heat/wind
 decomposition — written to two **publish targets**: the Strava activity **description** and
