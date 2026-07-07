@@ -1,0 +1,12 @@
+# On the Pi: put INTERVALS_API_KEY / INTERVALS_ATHLETE_ID in .env next to this file,
+# then `docker compose up -d --build`. Annotations appear within ~15 min of a run upload.
+services:
+  pacelab:
+    build: .
+    env_file: .env
+    volumes:
+      - pacelab-data:/data
+    restart: unless-stopped
+
+volumes:
+  pacelab-data:

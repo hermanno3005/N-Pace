@@ -79,6 +79,12 @@ A remote surface an annotation is written to — v1: the intervals.icu activity 
 which doubles as the Strava surface via intervals.icu's push-to-Strava bridge (ADR-0011).
 _Avoid_: destination, sink.
 
+**Watch**:
+The always-on polling loop that keeps annotations current without manual syncs: every tick
+it syncs a rolling window, so new runs get annotated within minutes and provisional
+analyses finalize as the archive catches up. Runs as a container on the home server.
+_Avoid_: daemon, cron job, webhook (we poll; see ADR-0013).
+
 **Provisional Analysis**:
 An analysis computed from forecast-tier weather because the run is more recent than the
 reanalysis archive's publication lag. A preview, marked with a tilde in its annotation,

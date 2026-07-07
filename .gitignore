@@ -11,3 +11,4 @@ __pycache__/
 # local secrets — never commit
 .env
 .env.*
+!.env.example
