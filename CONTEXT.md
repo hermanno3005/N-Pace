@@ -60,6 +60,25 @@ scoping for storage and cache: every stored result and cached file belongs to an
 v1 has exactly one; the seam keeps additional ones data, not a redesign.
 _Avoid_: user, profile, login.
 
+### Publishing
+
+**Annotation**:
+The marker-delimited PaceLab block written into an activity's public description/note,
+showing NP, observed pace, and the per-component decomposition. Not a Strava comment —
+comments cannot be created via Strava's API; editing the description is the mechanism.
+_Avoid_: comment, post.
+
+**Publish**:
+Writing an activity's annotation to its publish targets. Ambient once authorised (happens
+during sync), idempotent (re-publishing replaces PaceLab's own block, never stacks it,
+never touches the athlete's own text).
+_Avoid_: share, upload, sync (that's ingestion).
+
+**Publish Target**:
+A remote surface an annotation is written to — v1: the Strava activity description and the
+intervals.icu activity note.
+_Avoid_: destination, sink.
+
 ### The cost model
 
 **Pace Penalty**:
