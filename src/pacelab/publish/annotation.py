@@ -19,9 +19,11 @@ def _signed(cost_s_per_km: float) -> str:
     return f"{round(cost_s_per_km):+d}"
 
 
-def render_annotation(result: ActivityResult) -> str:
+def render_annotation(result: ActivityResult, provisional: bool = False) -> str:
+    # The tilde marks a forecast-tier preview that ERA5 will finalise (ADR-0012).
+    approx = "~" if provisional else ""
     return (
-        f"{MARKER} · NP {_pace(result.np_pace)} (ran {_pace(result.observed_pace)})\n"
+        f"{MARKER} · NP {approx}{_pace(result.np_pace)} (ran {_pace(result.observed_pace)})\n"
         f"⛰️ grade {_signed(result.cost_grade)} · 🌡️ heat {_signed(result.cost_heat)} · "
         f"💨 wind {_signed(result.cost_wind)} s/km (wind not in NP)"
     )

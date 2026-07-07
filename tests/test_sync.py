@@ -107,6 +107,77 @@ def test_activity_without_weather_yet_is_deferred_not_stored(tmp_path):
     assert store.load("i500", account_id="acct") is None
 
 
+class LaggedWeather:
+    """Archive service that starts empty (ERA5 lag) and gains the day later."""
+
+    def __init__(self, available=False):
+        self.available = available
+
+    def conditions_at(self, lat, lon, t):
+        from pacelab.weather.service import WeatherUnavailable
+
+        if not self.available:
+            raise WeatherUnavailable("not published yet")
+        return Conditions(20.0, 50.0, 0.0, 0.0, 0.0, 1013.0, 100.0)
+
+
+def test_recent_run_is_analysed_provisionally_then_finalized(tmp_path):
+    # ADR-0012: inside ERA5's lag a run gets a forecast-tier preview (tilde in the
+    # annotation, provisional in the store); once the archive catches up, the same sync
+    # command finalizes it — recomputed, republished without the tilde.
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i500", "2026-07-05", "Run", "Night Laufen")], gpx)
+    archive = LaggedWeather(available=False)
+    forecast = StubService()  # forecast tier always has recent days
+
+    outcomes = dict(sync(provider, archive, store, Config(), "2026-01-01", "2026-12-31",
+                         account_id="acct", provisional_service=forecast))
+
+    assert outcomes["i500"] == "provisional"
+    assert store.is_provisional("i500", account_id="acct")
+    assert "NP ~" in provider.descriptions["i500"]
+
+    archive.available = True  # ~a week later, ERA5 has the day
+    outcomes = dict(sync(provider, archive, store, Config(), "2026-01-01", "2026-12-31",
+                         account_id="acct", provisional_service=forecast))
+
+    assert outcomes["i500"] == "finalized"
+    assert not store.is_provisional("i500", account_id="acct")
+    assert "NP ~" not in provider.descriptions["i500"]
+    assert "PaceLab" in provider.descriptions["i500"]
+
+
+def test_no_weather_on_either_tier_defers(tmp_path):
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i501", "2026-07-07", "Run", "Just now")], gpx)
+
+    outcomes = dict(sync(provider, LaggedWeather(False), store, Config(), "2026-01-01",
+                         "2026-12-31", account_id="acct",
+                         provisional_service=LaggedWeather(False)))
+
+    assert outcomes["i501"] == "no-weather"
+    assert store.load("i501", account_id="acct") is None
+
+
+def test_finalized_activity_is_then_skipped(tmp_path):
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i500", "2026-07-05", "Run", "N")], gpx)
+    archive = LaggedWeather(available=True)
+
+    dict(sync(provider, archive, store, Config(), "2026-01-01", "2026-12-31",
+              account_id="acct", provisional_service=StubService()))
+    outcomes = dict(sync(provider, archive, store, Config(), "2026-01-01", "2026-12-31",
+                         account_id="acct", provisional_service=StubService()))
+
+    assert outcomes["i500"] == "skip"
+
+
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)

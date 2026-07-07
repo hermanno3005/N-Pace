@@ -34,6 +34,19 @@ def test_same_cell_and_day_fetches_only_once(tmp_path):
     assert fetcher.calls == 1
 
 
+def test_provisional_service_never_writes_to_disk(tmp_path):
+    # Forecast-tier weather is a preview — persisting it would freeze non-final data
+    # under the (cell, day) key and block the eventual ERA5 value (ADR-0012).
+    fetcher = StubFetcher(hourly_series())
+    svc = WeatherService(fetcher, cache_dir=tmp_path, disk_cache=False)
+
+    svc.conditions_at(48.0, 11.0, 1800.0)
+    svc.conditions_at(48.0, 11.0, 5400.0)  # same cell-day: memory-cached, one fetch
+
+    assert fetcher.calls == 1
+    assert list(tmp_path.iterdir()) == []  # nothing persisted
+
+
 class EmptyThenFullFetcher:
     """ERA5's publication lag: a too-recent day is empty now, populated days later."""
 
