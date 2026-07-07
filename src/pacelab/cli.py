@@ -75,36 +75,56 @@ def _run_analyze(args) -> int:
     return 0
 
 
+class _SyncContext:
+    """Everything a sync pass needs, built once (weather memory-caches stay warm)."""
+
+    def __init__(self, args):
+        self.args = args
+        self.config = Config(apply_wind=args.apply_wind)
+        account = Account.from_env()
+        self.account_id = account.storage_id  # one key for store rows and FIT cache (ADR-0009)
+        self.provider = IntervalsProvider(account, UrllibHttp(),
+                                          cache_dir=args.cache_dir / "activities")
+        self.store = ResultStore(args.db)
+        self.service = _weather(args.cache_dir)
+        # Forecast tier for runs inside ERA5's lag — never disk-cached (ADR-0012).
+        self.provisional = WeatherService(ForecastFetcher(), cache_dir=args.cache_dir / "weather",
+                                          disk_cache=False)
+
+    def run(self, oldest: str, newest: str):
+        outcomes = sync(self.provider, self.service, self.store, self.config, oldest, newest,
+                        account_id=self.account_id, reprocess=self.args.reprocess,
+                        provisional_service=self.provisional)
+        analysed = {"ok", "provisional", "finalized"}
+        for activity_id, status in outcomes:
+            if status in analysed:
+                if status != "ok":
+                    print(f"[{status}]")
+                _emit(activity_id, self.store.load(activity_id, account_id=self.account_id),
+                      self.config, self.args)
+            else:
+                print(f"{status:8} {activity_id}")
+        done = sum(1 for _, s in outcomes if s in analysed)
+        print(f"synced {done} / {len(outcomes)} listed\n", flush=True)
+        return outcomes
+
+
 def _run_sync(args) -> int:
-    config = Config(apply_wind=args.apply_wind)
-    account = Account.from_env()
-    account_id = account.storage_id  # same key for store rows and the FIT cache (ADR-0009)
-    provider = IntervalsProvider(account, UrllibHttp(), cache_dir=args.cache_dir / "activities")
-    store = ResultStore(args.db)
-    service = _weather(args.cache_dir)
-
-    # Forecast tier for runs inside ERA5's lag — previews are never disk-cached (ADR-0012).
-    provisional_service = WeatherService(ForecastFetcher(), cache_dir=args.cache_dir / "weather",
-                                         disk_cache=False)
-
     try:
-        outcomes = sync(provider, service, store, config, args.oldest, args.newest,
-                        account_id=account_id, reprocess=args.reprocess,
-                        provisional_service=provisional_service)
+        _SyncContext(args).run(args.oldest, args.newest)
     except RateLimited as e:
         print(f"{e} — already-synced activities are saved; rerun to continue.", file=sys.stderr)
         return 1
+    return 0
 
-    analysed = {"ok", "provisional", "finalized"}
-    for activity_id, status in outcomes:
-        if status in analysed:
-            if status != "ok":
-                print(f"[{status}]")
-            _emit(activity_id, store.load(activity_id, account_id=account_id), config, args)
-        else:
-            print(f"{status:8} {activity_id}")
-    done = sum(1 for _, s in outcomes if s in analysed)
-    print(f"\nsynced {done} / {len(outcomes)} listed")
+
+def _run_watch(args) -> int:
+    from pacelab.watch import watch
+
+    context = _SyncContext(args)
+    print(f"pacelab watch: every {args.interval}s over the last {args.window_days} days",
+          flush=True)
+    watch(context.run, interval_s=args.interval, window_days=args.window_days, ticks=args.ticks)
     return 0
 
 
@@ -148,11 +168,24 @@ def main(argv: list[str] | None = None) -> int:
     publish_p.add_argument("--to", dest="newest", default=date.today().isoformat(), help="newest date")
     _add_common(publish_p)
 
+    from pacelab.watch import DEFAULT_INTERVAL_S, DEFAULT_WINDOW_DAYS
+
+    watch_p = sub.add_parser("watch", help="poll intervals.icu and keep annotations current")
+    watch_p.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_S,
+                         help="seconds between ticks")
+    watch_p.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS,
+                         help="rolling sync window per tick")
+    watch_p.add_argument("--ticks", type=int, default=None,
+                         help="stop after N ticks (1 = cron-compatible single pass)")
+    _add_common(watch_p)
+
     args = parser.parse_args(argv)
     if args.command == "sync":
         return _run_sync(args)
     if args.command == "publish":
         return _run_publish(args)
+    if args.command == "watch":
+        return _run_watch(args)
     return _run_analyze(args)
 
 
