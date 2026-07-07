@@ -53,6 +53,8 @@ def to_dict(activity_id: str, result: ActivityResult, model_version: str) -> dic
                 "wind_speed_ms": s.wind_speed_ms, "wind_dir_deg": s.wind_dir_deg,
                 "p_grade": s.p_grade, "p_heat": s.p_heat, "p_wind": s.p_wind,
                 "pace_obs": s.pace_obs, "pace_np": s.pace_np, "stopped": s.stopped,
+                # None = no solar data = heat fell back to the Heat Index (ADR-0010).
+                "solar_radiation_wm2": s.solar_radiation_wm2,
             }
             for s in result.segments
         ],

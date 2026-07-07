@@ -18,7 +18,7 @@ from pacelab.account import Account
 from pacelab.app import analyze_file
 from pacelab.config import Config
 from pacelab.providers.http import UrllibHttp
-from pacelab.providers.intervals import IntervalsProvider
+from pacelab.providers.intervals import IntervalsProvider, RateLimited
 from pacelab.report import format_segments, format_summary, to_dict
 from pacelab.store import ResultStore
 from pacelab.sync import sync
@@ -76,13 +76,17 @@ def _run_analyze(args) -> int:
 def _run_sync(args) -> int:
     config = Config(apply_wind=args.apply_wind)
     account = Account.from_env()
-    account_id = f"intervals:{account.athlete_id}"
+    account_id = account.storage_id  # same key for store rows and the FIT cache (ADR-0009)
     provider = IntervalsProvider(account, UrllibHttp(), cache_dir=args.cache_dir / "activities")
     store = ResultStore(args.db)
     service = _weather(args.cache_dir)
 
-    outcomes = sync(provider, service, store, config, args.oldest, args.newest,
-                    account_id=account_id, reprocess=args.reprocess)
+    try:
+        outcomes = sync(provider, service, store, config, args.oldest, args.newest,
+                        account_id=account_id, reprocess=args.reprocess)
+    except RateLimited as e:
+        print(f"{e} — already-synced activities are saved; rerun to continue.", file=sys.stderr)
+        return 1
 
     for activity_id, status in outcomes:
         if status == "ok":

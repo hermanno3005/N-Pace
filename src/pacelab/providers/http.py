@@ -6,7 +6,7 @@ client does); tests pass a stub that returns canned responses.
 
 import ssl
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import certifi
@@ -16,6 +16,7 @@ import certifi
 class HttpResponse:
     status: int
     content: bytes
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class Http(Protocol):
@@ -38,6 +39,8 @@ class UrllibHttp:
         request = urllib.request.Request(url, headers=headers, method="GET")
         try:
             with urllib.request.urlopen(request, timeout=self._timeout, context=self._ssl) as resp:
-                return HttpResponse(status=resp.status, content=resp.read())
+                return HttpResponse(status=resp.status, content=resp.read(),
+                                    headers=dict(resp.headers))
         except urllib.error.HTTPError as e:
-            return HttpResponse(status=e.code, content=e.read())
+            return HttpResponse(status=e.code, content=e.read(),
+                                headers=dict(e.headers or {}))

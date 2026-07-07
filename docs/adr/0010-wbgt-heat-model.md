@@ -54,8 +54,9 @@ scale* than air temperature (even dry/calm/shade, WBGT ≠ T_air), so the coeffi
 ## Fallback & versioning
 
 WBGT is primary; when `shortwave_radiation` is unavailable (a gap, or streams-sourced data),
-fall back to the v1 **Heat Index**, confidence-tagged — both stay behind the one
-`heat_penalty(conditions)` interface. Switching the index is a model change, so
+fall back to the v1 **Heat Index** — both stay behind the one `heat_penalty(conditions)`
+interface. The confidence tag is the persisted per-segment `solar_radiation_wm2`: **NULL
+means the Heat Index was used** for that segment (a value means WBGT). Switching the index is a model change, so
 **`model_version` → 0.2.0**; the store's idempotency recomputes history under WBGT (FR-10.2).
 
 ## Implementation note (globe term)

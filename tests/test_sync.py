@@ -61,6 +61,21 @@ def test_sync_skips_activities_with_no_gps_track(tmp_path):
     assert store.load("i900", account_id="acct") is None  # not stored
 
 
+def test_sync_marks_unparseable_formats_unsupported(tmp_path):
+    # intervals.icu originals can be TCX; we cache them (they're the user's data) but
+    # have no TCX parser — sync must say so, not feed them to the GPX adapter.
+    tcx = tmp_path / "i300.tcx"
+    tcx.write_text('<?xml version="1.0"?><TrainingCenterDatabase></TrainingCenterDatabase>')
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i300", "2024-07-03", "Run", "C")], tcx)
+
+    outcomes = dict(sync(provider, StubService(), store, Config(), "2024-01-01", "2024-12-31",
+                         account_id="acct"))
+
+    assert outcomes["i300"] == "unsupported"
+    assert store.load("i300", account_id="acct") is None
+
+
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)

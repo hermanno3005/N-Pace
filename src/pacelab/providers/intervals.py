@@ -18,6 +18,26 @@ _BASE = "https://intervals.icu/api/v1"
 _GZIP_MAGIC = b"\x1f\x8b"
 
 
+class RateLimited(RuntimeError):
+    """intervals.icu returned 429 — stop the sync and retry after the given delay.
+
+    Raised (not folded into skip-and-warn) so a sync aborts instead of hammering the
+    remaining activities; see docs/research/activity-api-ingestion.md, rate limits.
+    """
+
+    def __init__(self, retry_after_s: int | None):
+        super().__init__(
+            "intervals.icu rate limit hit (HTTP 429)"
+            + (f" — retry after {retry_after_s}s" if retry_after_s else "")
+        )
+        self.retry_after_s = retry_after_s
+
+
+def _retry_after(resp) -> int | None:
+    value = resp.headers.get("Retry-After")
+    return int(value) if value and value.isdigit() else None
+
+
 def _sniff_extension(raw: bytes) -> str:
     """Detect the activity file format from its bytes (original may be FIT/GPX/TCX)."""
     if len(raw) >= 12 and raw[8:12] == b".FIT":
@@ -51,6 +71,10 @@ class IntervalsProvider:
     def list_activities(self, oldest: str, newest: str) -> list[ActivityRef]:
         url = f"{_BASE}/athlete/{self._account.athlete_id}/activities?oldest={oldest}&newest={newest}"
         resp = self._http.get(url, self._headers)
+        if resp.status == 429:
+            raise RateLimited(_retry_after(resp))
+        if resp.status != 200:
+            raise RuntimeError(f"intervals.icu activity listing failed (HTTP {resp.status})")
         activities = json.loads(resp.content)
         return [
             ActivityRef(
@@ -70,7 +94,12 @@ class IntervalsProvider:
         """
         url = f"{_BASE}/activity/{activity_id}/file"
         resp = self._http.get(url, self._headers)
+        if resp.status == 429:
+            raise RateLimited(_retry_after(resp))
+        if resp.status >= 500:
+            raise RuntimeError(f"intervals.icu download failed for {activity_id} (HTTP {resp.status})")
         if resp.status != 200:
+            # 4xx: intervals.icu has no original for this activity (e.g. Strava-synced).
             warnings.warn(
                 f"no original file for {activity_id} (HTTP {resp.status}) — skipping",
                 stacklevel=2,
@@ -79,7 +108,7 @@ class IntervalsProvider:
         raw = resp.content
         if raw[:2] == _GZIP_MAGIC:
             raw = gzip.decompress(raw)
-        dest = self._cache_dir / self._account.athlete_id / f"{activity_id}.{_sniff_extension(raw)}"
+        dest = self._cache_dir / self._account.storage_id / f"{activity_id}.{_sniff_extension(raw)}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(raw)
         return dest

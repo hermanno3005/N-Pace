@@ -1,12 +1,13 @@
-"""Heat model — Heat Index → pace penalty (FR-5, ADR-0001).
+"""Heat model — heat-stress index → pace penalty (FR-5, ADR-0010).
 
-The stress index is the NWS Heat Index (air temperature + relative humidity, wind excluded
-per ADR-0001), which reduces to air temperature in cool/dry conditions and rises above it
-when muggy. It is mapped to a pace penalty by a power-law anchored to the El Helou/Ely
-temperature-vs-performance curve, zero at or below the 10 °C reference (ADR-0002).
+The primary index is **WBGT** (temperature + humidity + wind + solar; see models/wbgt.py),
+which makes wind cooling intrinsic. When no solar data is available the model falls back to
+the v1 **NWS Heat Index** (temperature + humidity only) — the persisted per-segment solar
+value being NULL is the fallback's confidence tag. Each index maps to a fractional pace
+penalty by a power-law anchored to El Helou (2012), zero at or below its own reference.
 
-Coefficients are provisional defaults (like grade's k_grade) — tunable, and to be grounded
-against the heat-performance literature / personal calibration (ADR-0006).
+Coefficients are provisional (like grade's k_grade) — grounded in
+docs/research/wbgt-heat-model.md, to be personalised by calibration (ADR-0006).
 """
 
 import math
@@ -14,8 +15,10 @@ import math
 from pacelab.models.wbgt import wbgt
 from pacelab.weather.conditions import Conditions
 
-REFERENCE_TEMP_C = 10.0  # ADR-0002; heat penalty is zero at/below this
-DEFAULT_HEAT_A = 0.0018  # Heat Index (v1 / fallback) power-law scale
+# Heat Index fallback curve (v1). Its zero-point is the 10 °C reference *air temperature*
+# (ADR-0002); the primary WBGT path zeroes at WBGT_REF_C below instead.
+REFERENCE_TEMP_C = 10.0
+DEFAULT_HEAT_A = 0.0018  # Heat Index power-law scale
 DEFAULT_HEAT_B = 1.5  # Heat Index curvature
 
 # WBGT curve (v0.2, ADR-0010): reference and coefficients grounded in

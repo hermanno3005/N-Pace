@@ -14,6 +14,15 @@ class Account:
     api_key: str
     athlete_id: str = "0"  # intervals.icu: 0 means "the key's owner"
 
+    @property
+    def storage_id(self) -> str:
+        """The one key this account's data lives under — store rows AND the FIT cache.
+
+        Provider-qualified so a future second provider can't collide, and
+        filesystem-safe (no ':', which Windows forbids in paths).
+        """
+        return f"intervals-{self.athlete_id}"
+
     @classmethod
     def from_env(cls) -> "Account":
         key = os.environ.get("INTERVALS_API_KEY")
