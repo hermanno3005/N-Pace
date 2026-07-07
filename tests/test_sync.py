@@ -86,6 +86,27 @@ def test_sync_marks_unparseable_formats_unsupported(tmp_path):
     assert store.load("i300", account_id="acct") is None
 
 
+def test_activity_without_weather_yet_is_deferred_not_stored(tmp_path):
+    # A run more recent than ERA5's publication lag can't be analysed yet — report it
+    # and leave nothing in the store, so the next sync retries it.
+    from pacelab.weather.service import WeatherUnavailable
+
+    class NoWeatherService:
+        def conditions_at(self, lat, lon, t):
+            raise WeatherUnavailable("no weather for 2026-07-05 yet")
+
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i500", "2026-07-05", "Run", "Night Laufen")], gpx)
+
+    outcomes = dict(sync(provider, NoWeatherService(), store, Config(), "2026-01-01",
+                         "2026-12-31", account_id="acct"))
+
+    assert outcomes["i500"] == "no-weather"
+    assert store.load("i500", account_id="acct") is None
+
+
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)

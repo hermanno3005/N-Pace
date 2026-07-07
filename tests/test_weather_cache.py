@@ -34,6 +34,35 @@ def test_same_cell_and_day_fetches_only_once(tmp_path):
     assert fetcher.calls == 1
 
 
+class EmptyThenFullFetcher:
+    """ERA5's publication lag: a too-recent day is empty now, populated days later."""
+
+    def __init__(self, series):
+        self.series = series
+        self.calls = 0
+
+    def fetch_hourly(self, lat, lon, day):
+        self.calls += 1
+        return [] if self.calls == 1 else self.series
+
+
+def test_missing_weather_raises_and_is_never_cached(tmp_path):
+    # An empty day (ERA5 lag) must raise a clear error AND leave no cache entry —
+    # a cached empty day would block that date forever once ERA5 catches up.
+    from pacelab.weather.service import WeatherUnavailable
+
+    fetcher = EmptyThenFullFetcher(hourly_series())
+    svc = WeatherService(fetcher, cache_dir=tmp_path)
+
+    with pytest.raises(WeatherUnavailable, match="1970-01-01"):
+        svc.conditions_at(48.0, 11.0, 1800.0)
+    assert list(tmp_path.iterdir()) == []  # nothing poisoned on disk
+
+    # Once the archive has the day, the same service serves it (refetches).
+    assert svc.conditions_at(48.0, 11.0, 1800.0).temperature_c == pytest.approx(0.5)
+    assert fetcher.calls == 2
+
+
 def test_disk_cache_survives_a_new_service(tmp_path):
     WeatherService(StubFetcher(hourly_series()), cache_dir=tmp_path).conditions_at(48.0, 11.0, 1800.0)
 
