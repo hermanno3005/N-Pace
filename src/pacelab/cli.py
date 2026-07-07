@@ -23,6 +23,7 @@ from pacelab.publish.publisher import publish_range
 from pacelab.report import format_segments, format_summary, to_dict
 from pacelab.store import ResultStore
 from pacelab.sync import sync
+from pacelab.weather.forecast import ForecastFetcher
 from pacelab.weather.open_meteo import OpenMeteoFetcher
 from pacelab.weather.service import WeatherService
 
@@ -82,20 +83,28 @@ def _run_sync(args) -> int:
     store = ResultStore(args.db)
     service = _weather(args.cache_dir)
 
+    # Forecast tier for runs inside ERA5's lag — previews are never disk-cached (ADR-0012).
+    provisional_service = WeatherService(ForecastFetcher(), cache_dir=args.cache_dir / "weather",
+                                         disk_cache=False)
+
     try:
         outcomes = sync(provider, service, store, config, args.oldest, args.newest,
-                        account_id=account_id, reprocess=args.reprocess)
+                        account_id=account_id, reprocess=args.reprocess,
+                        provisional_service=provisional_service)
     except RateLimited as e:
         print(f"{e} — already-synced activities are saved; rerun to continue.", file=sys.stderr)
         return 1
 
+    analysed = {"ok", "provisional", "finalized"}
     for activity_id, status in outcomes:
-        if status == "ok":
+        if status in analysed:
+            if status != "ok":
+                print(f"[{status}]")
             _emit(activity_id, store.load(activity_id, account_id=account_id), config, args)
         else:
             print(f"{status:8} {activity_id}")
-    ok = sum(1 for _, s in outcomes if s == "ok")
-    print(f"\nsynced {ok} new / {len(outcomes)} listed")
+    done = sum(1 for _, s in outcomes if s in analysed)
+    print(f"\nsynced {done} / {len(outcomes)} listed")
     return 0
 
 

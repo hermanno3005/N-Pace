@@ -21,6 +21,17 @@ def test_marker_is_the_first_line_prefix():
     assert render_annotation(result()).startswith(MARKER)
 
 
+def test_provisional_annotation_marks_np_as_approximate():
+    # Forecast-tier weather → the NP is a preview that ERA5 will finalise; the tilde
+    # says so without cluttering the block (NFR-2 honesty).
+    text = render_annotation(result(), provisional=True)
+    assert "NP ~4:37/km" in text
+
+
+def test_final_annotation_has_no_tilde():
+    assert "~" not in render_annotation(result())
+
+
 def test_zero_components_render_as_plus_zero():
     text = render_annotation(result(grade=0.2, heat=0.0, wind=0.0))
     assert "⛰️ grade +0 · 🌡️ heat +0 · 💨 wind +0" in text

@@ -48,6 +48,20 @@ def test_missing_original_skips_with_a_warning(tmp_path):
         assert provider.download("i103") is None
 
 
+def test_cached_original_is_served_without_a_network_call(tmp_path):
+    # Originals are immutable (ADR-0008): once cached, download() must not refetch —
+    # the finalization pass (ADR-0012) re-analyses cached FITs days later.
+    class ExplodingHttp:
+        def get(self, url, headers):
+            raise AssertionError("network hit for a cached original")
+
+    first = _provider(HttpResponse(200, gzip.compress(FIT_BYTES)), tmp_path)
+    path = first.download("i106")
+
+    again = IntervalsProvider(Account("secret", "0"), ExplodingHttp(), cache_dir=tmp_path)
+    assert again.download("i106") == path
+
+
 def test_rate_limit_raises_instead_of_masquerading_as_missing(tmp_path):
     # A 429 is NOT "no original file" — it must abort the sync (honour Retry-After),
     # not skip-and-hammer the remaining activities (research doc §rate limits).

@@ -39,10 +39,14 @@ def _day(t: float) -> str:
 
 
 class WeatherService:
-    def __init__(self, fetcher: Fetcher, cache_dir: Path):
+    def __init__(self, fetcher: Fetcher, cache_dir: Path, disk_cache: bool = True):
+        # disk_cache=False is the provisional (forecast-tier) mode: previews must never
+        # be persisted, or they'd block the final ERA5 value for that cell-day (ADR-0012).
         self._fetcher = fetcher
+        self._disk_cache = disk_cache
         self._dir = Path(cache_dir)
-        self._dir.mkdir(parents=True, exist_ok=True)
+        if disk_cache:
+            self._dir.mkdir(parents=True, exist_ok=True)
         self._memory: dict[str, _HourlySeries] = {}
 
     def conditions_at(self, lat: float, lon: float, t: float) -> Conditions:
@@ -56,17 +60,18 @@ class WeatherService:
             return self._memory[key]
 
         path = self._dir / f"{key}.json"
-        if path.exists():
+        if self._disk_cache and path.exists():
             series = _decode(json.loads(path.read_text()))
         else:
             series = self._fetcher.fetch_hourly(cell_lat, cell_lon, day)
             if not series:
-                # ERA5 hasn't published this day yet. Cache NOTHING — a cached empty
-                # day would block the date forever once the archive catches up.
+                # No data for this day. Cache NOTHING — a cached empty day would block
+                # the date forever once the source catches up.
                 raise WeatherUnavailable(
                     f"no weather for {day} yet (ERA5 lags ~a week) — retry in a few days"
                 )
-            path.write_text(json.dumps(_encode(series)))
+            if self._disk_cache:
+                path.write_text(json.dumps(_encode(series)))
         self._memory[key] = series
         return series
 

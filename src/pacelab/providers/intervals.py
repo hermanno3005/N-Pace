@@ -111,7 +111,13 @@ class IntervalsProvider:
 
         Returns the cached path, or ``None`` (with a warning) when no original is available
         — e.g. Strava-synced activities, which intervals.icu can't serve (ADR-0008).
+
+        Originals are immutable, so a cache hit never refetches — re-analysis passes
+        (model bumps, ADR-0012 finalization) run network-free.
         """
+        cached = sorted((self._cache_dir / self._account.storage_id).glob(f"{activity_id}.*"))
+        if cached:
+            return cached[0]
         url = f"{_BASE}/activity/{activity_id}/file"
         resp = self._http.get(url, self._headers)
         if resp.status == 429:

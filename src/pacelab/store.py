@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS activities (
     cost_wind     REAL,
     model_version TEXT,
     published_version TEXT,
+    provisional   INTEGER DEFAULT 0,
     PRIMARY KEY (account_id, activity_id)
 );
 CREATE TABLE IF NOT EXISTS segments (
@@ -63,6 +64,8 @@ class ResultStore:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
         if "published_version" not in columns:
             conn.execute("ALTER TABLE activities ADD COLUMN published_version TEXT")
+        if "provisional" not in columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN provisional INTEGER DEFAULT 0")
 
     @staticmethod
     def _migrate_v01(conn: sqlite3.Connection) -> None:
@@ -82,7 +85,7 @@ class ResultStore:
             "ALTER TABLE activities RENAME TO activities_v01;"
             "ALTER TABLE segments RENAME TO segments_v01;"
             + _SCHEMA +
-            "INSERT INTO activities SELECT 'local', *, NULL FROM activities_v01;"
+            "INSERT INTO activities SELECT 'local', *, NULL, 0 FROM activities_v01;"
             "INSERT INTO segments SELECT 'local', s.*, NULL FROM segments_v01 s;"
             "DROP TABLE activities_v01;"
             "DROP TABLE segments_v01;"
@@ -92,7 +95,7 @@ class ResultStore:
         return sqlite3.connect(self._path)
 
     def save(self, activity_id: str, result: ActivityResult, model_version: str,
-             account_id: str = "local") -> None:
+             account_id: str = "local", provisional: bool = False) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM activities WHERE account_id = ? AND activity_id = ?",
                          (account_id, activity_id))
@@ -101,10 +104,10 @@ class ResultStore:
             # published_version starts NULL — a recompute resets it, so sync republishes
             # exactly when it reanalyses (ADR-0011).
             conn.execute(
-                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?,NULL)",
+                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?,NULL,?)",
                 (account_id, activity_id, result.distance_m, result.observed_pace,
                  result.np_pace, result.cost_grade, result.cost_heat, result.cost_wind,
-                 model_version),
+                 model_version, int(provisional)),
             )
             conn.executemany(
                 "INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -116,6 +119,15 @@ class ResultStore:
                     for s in result.segments
                 ],
             )
+
+    def is_provisional(self, activity_id: str, account_id: str = "local") -> bool:
+        """True when the stored result came from forecast-tier weather (ADR-0012)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT provisional FROM activities WHERE account_id = ? AND activity_id = ?",
+                (account_id, activity_id),
+            ).fetchone()
+        return row is not None and bool(row[0])
 
     def needs_publish(self, activity_id: str, model_version: str, account_id: str = "local") -> bool:
         """True when a stored result hasn't been annotated under this model version."""

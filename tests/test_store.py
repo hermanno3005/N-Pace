@@ -92,6 +92,18 @@ def test_segment_solar_radiation_round_trips(tmp_path):
     assert store.load("sunny").segments[0].solar_radiation_wm2 == 650.0
 
 
+def test_provisional_flag_round_trips_and_clears_on_final_save(tmp_path):
+    # A forecast-tier analysis is stored provisional; the ERA5 recompute overwrites it
+    # as final (ADR-0012).
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct", provisional=True)
+    assert store.is_provisional("act1", account_id="acct")
+
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
+    assert not store.is_provisional("act1", account_id="acct")
+    assert not store.is_provisional("ghost", account_id="acct")  # unknown → not provisional
+
+
 def test_publish_state_tracks_the_model_version(tmp_path):
     # An activity needs publishing until marked; a recompute (save) resets the mark so
     # sync republishes exactly when it reanalyses (ADR-0011).

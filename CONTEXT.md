@@ -79,6 +79,13 @@ A remote surface an annotation is written to — v1: the intervals.icu activity 
 which doubles as the Strava surface via intervals.icu's push-to-Strava bridge (ADR-0011).
 _Avoid_: destination, sink.
 
+**Provisional Analysis**:
+An analysis computed from forecast-tier weather because the run is more recent than the
+reanalysis archive's publication lag. A preview, marked with a tilde in its annotation,
+never disk-cached, and automatically **finalized** — recomputed against the pinned archive
+and republished — by a later sync.
+_Avoid_: draft, estimate, preliminary result.
+
 ### The cost model
 
 **Pace Penalty**:

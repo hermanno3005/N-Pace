@@ -17,7 +17,7 @@ def publish_activity(provider, store: ResultStore, activity_id: str, model_versi
                      account_id: str) -> None:
     """Render, splice into the current description, write back, and mark published."""
     result = store.load(activity_id, account_id=account_id)
-    block = render_annotation(result)
+    block = render_annotation(result, provisional=store.is_provisional(activity_id, account_id=account_id))
     current = provider.fetch_description(activity_id)
     provider.update_description(activity_id, splice_annotation(current, block))
     store.mark_published(activity_id, model_version, account_id=account_id)
