@@ -22,6 +22,8 @@ import certifi
 from pacelab.weather.conditions import Conditions
 
 _ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+# Order matches the Conditions constructor positionally (…, pressure, solar). shortwave_
+# radiation feeds WBGT (ADR-0010); cloud_cover is now unused by heat but kept harmless.
 _HOURLY_FIELDS = [
     "temperature_2m",
     "relative_humidity_2m",
@@ -29,6 +31,7 @@ _HOURLY_FIELDS = [
     "wind_direction_10m",
     "cloud_cover",
     "surface_pressure",
+    "shortwave_radiation",
 ]
 # ERA5-Land is finer (~9 km) but only carries temperature/humidity; ERA5 (~25 km) has the
 # rest. Each field prefers the first model that provides a non-null value.

@@ -31,6 +31,9 @@ def interpolate_conditions(hourly: _HourlySeries, t: float) -> Conditions:
     def lin(x0: float, x1: float) -> float:
         return x0 + frac * (x1 - x0)
 
+    def lin_opt(x0: float | None, x1: float | None) -> float | None:
+        return None if x0 is None or x1 is None else lin(x0, x1)
+
     return Conditions(
         temperature_c=lin(c0.temperature_c, c1.temperature_c),
         humidity_pct=lin(c0.humidity_pct, c1.humidity_pct),
@@ -38,4 +41,5 @@ def interpolate_conditions(hourly: _HourlySeries, t: float) -> Conditions:
         wind_dir_deg=_interp_angle(c0.wind_dir_deg, c1.wind_dir_deg, frac),
         cloud_cover_pct=lin(c0.cloud_cover_pct, c1.cloud_cover_pct),
         pressure_hpa=lin(c0.pressure_hpa, c1.pressure_hpa),
+        solar_radiation_wm2=lin_opt(c0.solar_radiation_wm2, c1.solar_radiation_wm2),
     )

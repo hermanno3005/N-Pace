@@ -34,3 +34,74 @@ def test_recompute_replaces_rather_than_duplicates(tmp_path):
     loaded = store.load("act1")
     assert len(loaded.segments) == 2  # not 4
     assert store.is_current("act1", "0.2.0")
+
+
+V01_SCHEMA = """
+CREATE TABLE activities (
+    activity_id   TEXT PRIMARY KEY,
+    distance_m    REAL, observed_pace REAL, np_pace REAL,
+    cost_grade    REAL, cost_heat REAL, cost_wind REAL,
+    model_version TEXT
+);
+CREATE TABLE segments (
+    activity_id TEXT, idx INTEGER, distance REAL, grade REAL, elapsed REAL,
+    temperature_c REAL, humidity_pct REAL, wind_speed_ms REAL, wind_dir_deg REAL,
+    p_grade REAL, p_heat REAL, p_wind REAL, pace_obs REAL, pace_np REAL,
+    stopped INTEGER,
+    PRIMARY KEY (activity_id, idx)
+);
+"""
+
+
+def test_opening_a_v01_database_migrates_it(tmp_path):
+    # A pre-account-id (v0.1) database must not crash the store (regression: it did,
+    # with "no such column: account_id"). Old rows migrate under the "local" account.
+    import sqlite3
+
+    db = tmp_path / "pacelab.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(V01_SCHEMA)
+    conn.execute("INSERT INTO activities VALUES ('old1', 5000.0, 300.0, 295.0, 3.0, 2.0, 0.0, '0.1.0')")
+    conn.execute(
+        "INSERT INTO segments VALUES ('old1', 0, 100.0, 0.01, 30.0, 12.0, 55.0, 2.0, 180.0,"
+        " 0.005, 0.01, 0.0, 300.0, 295.0, 0)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = ResultStore(db)  # must not raise
+    migrated = store.load("old1")  # old rows land under the default "local" account
+    assert migrated is not None
+    assert migrated.np_pace == 295.0
+    assert len(migrated.segments) == 1
+    assert migrated.segments[0].solar_radiation_wm2 is None  # column didn't exist in v0.1
+    assert store.is_current("old1", "0.1.0")
+    # And the store is fully writable post-migration.
+    store.save("new1", make_result(), model_version="0.2.0")
+    assert store.load("new1") == make_result()
+
+
+def test_segment_solar_radiation_round_trips(tmp_path):
+    # Per-segment solar is persisted (ADR-0006: per-segment conditions); NULL marks the
+    # Heat Index fallback (ADR-0010's confidence tag).
+    store = ResultStore(tmp_path / "pacelab.db")
+    seg = SegmentResult(0, 100.0, 0.0, 30.0, 20.0, 50.0, 2.0, 180.0, 0.0, 0.01, 0.0,
+                        300.0, 297.0, False, solar_radiation_wm2=650.0)
+    result = ActivityResult(300.0, 297.0, 0.0, 3.0, 0.0, 100.0, [seg])
+    store.save("sunny", result, model_version="0.2.0")
+    assert store.load("sunny").segments[0].solar_radiation_wm2 == 650.0
+
+
+def test_results_are_isolated_by_account(tmp_path):
+    # ADR-0009: the same activity id under two accounts must not collide.
+    store = ResultStore(tmp_path / "pacelab.db")
+    alice = make_result()
+    bob = ActivityResult(observed_pace=400.0, np_pace=395.0, cost_grade=0.0,
+                         cost_heat=0.0, cost_wind=0.0, distance_m=100.0, segments=[])
+    store.save("i100", alice, model_version="0.1.0", account_id="alice")
+    store.save("i100", bob, model_version="0.1.0", account_id="bob")
+
+    assert store.load("i100", account_id="alice") == alice
+    assert store.load("i100", account_id="bob") == bob
+    assert store.is_current("i100", "0.1.0", account_id="alice")
+    assert not store.is_current("i100", "0.1.0", account_id="carol")

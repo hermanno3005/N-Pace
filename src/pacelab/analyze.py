@@ -32,6 +32,9 @@ class SegmentResult:
     pace_obs: float  # s/km
     pace_np: float  # s/km
     stopped: bool
+    # Per-segment solar (ADR-0006: persist per-segment conditions). None doubles as the
+    # confidence tag for the Heat Index fallback (ADR-0010): no solar data → HI was used.
+    solar_radiation_wm2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,7 @@ def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> Activ
             wind_speed_ms=c.wind_speed_ms, wind_dir_deg=c.wind_dir_deg,
             p_grade=cost.p_grade, p_heat=cost.p_heat, p_wind=cost.p_wind,
             pace_obs=pace_obs, pace_np=pace_np, stopped=s.stopped,
+            solar_radiation_wm2=c.solar_radiation_wm2,
         ))
 
     if total_dist == 0:
