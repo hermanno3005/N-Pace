@@ -20,7 +20,7 @@ from pacelab.config import Config
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
 from pacelab.publish.publisher import publish_range
-from pacelab.report import format_segments, format_summary, to_dict
+from pacelab.report import format_segments, format_summary, format_trend, to_dict
 from pacelab.store import ResultStore
 from pacelab.sync import sync
 from pacelab.weather.forecast import ForecastFetcher
@@ -148,6 +148,16 @@ def _run_publish(args) -> int:
     return 0
 
 
+def _run_trend(args) -> int:
+    account_id = Account.from_env().storage_id
+    points = ResultStore(args.db).np_trend(account_id=account_id)
+    if not points:
+        print("no analysed activities yet — run `pacelab sync` first", file=sys.stderr)
+        return 1
+    print(format_trend(points))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pacelab", description="Environment-adjusted pace engine")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -179,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
                          help="stop after N ticks (1 = cron-compatible single pass)")
     _add_common(watch_p)
 
+    trend_p = sub.add_parser("trend", help="NP over time — fitness with conditions stripped out")
+    trend_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
+
     args = parser.parse_args(argv)
     if args.command == "sync":
         return _run_sync(args)
@@ -186,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_publish(args)
     if args.command == "watch":
         return _run_watch(args)
+    if args.command == "trend":
+        return _run_trend(args)
     return _run_analyze(args)
 
 

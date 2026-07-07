@@ -6,6 +6,7 @@ version skips, a bumped version recomputes and replaces.
 """
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from pacelab.analyze import ActivityResult, SegmentResult
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS activities (
     model_version TEXT,
     published_version TEXT,
     provisional   INTEGER DEFAULT 0,
+    start_time    REAL,
     PRIMARY KEY (account_id, activity_id)
 );
 CREATE TABLE IF NOT EXISTS segments (
@@ -66,6 +68,8 @@ class ResultStore:
             conn.execute("ALTER TABLE activities ADD COLUMN published_version TEXT")
         if "provisional" not in columns:
             conn.execute("ALTER TABLE activities ADD COLUMN provisional INTEGER DEFAULT 0")
+        if "start_time" not in columns:
+            conn.execute("ALTER TABLE activities ADD COLUMN start_time REAL")
 
     @staticmethod
     def _migrate_v01(conn: sqlite3.Connection) -> None:
@@ -85,7 +89,7 @@ class ResultStore:
             "ALTER TABLE activities RENAME TO activities_v01;"
             "ALTER TABLE segments RENAME TO segments_v01;"
             + _SCHEMA +
-            "INSERT INTO activities SELECT 'local', *, NULL, 0 FROM activities_v01;"
+            "INSERT INTO activities SELECT 'local', *, NULL, 0, NULL FROM activities_v01;"
             "INSERT INTO segments SELECT 'local', s.*, NULL FROM segments_v01 s;"
             "DROP TABLE activities_v01;"
             "DROP TABLE segments_v01;"
@@ -104,10 +108,10 @@ class ResultStore:
             # published_version starts NULL — a recompute resets it, so sync republishes
             # exactly when it reanalyses (ADR-0011).
             conn.execute(
-                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?,NULL,?)",
+                "INSERT INTO activities VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?)",
                 (account_id, activity_id, result.distance_m, result.observed_pace,
                  result.np_pace, result.cost_grade, result.cost_heat, result.cost_wind,
-                 model_version, int(provisional)),
+                 model_version, int(provisional), result.start_time),
             )
             conn.executemany(
                 "INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -119,6 +123,13 @@ class ResultStore:
                     for s in result.segments
                 ],
             )
+
+    def delete(self, activity_id: str, account_id: str = "local") -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM activities WHERE account_id = ? AND activity_id = ?",
+                         (account_id, activity_id))
+            conn.execute("DELETE FROM segments WHERE account_id = ? AND activity_id = ?",
+                         (account_id, activity_id))
 
     def is_provisional(self, activity_id: str, account_id: str = "local") -> bool:
         """True when the stored result came from forecast-tier weather (ADR-0012)."""
@@ -154,11 +165,21 @@ class ResultStore:
             ).fetchone()
         return row is not None and row[0] == model_version
 
+    def np_trend(self, account_id: str = "local") -> list["TrendPoint"]:
+        """NP over time (FR-9.3): one point per stored activity, date-ordered."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT activity_id, start_time, distance_m, observed_pace, np_pace, "
+                "provisional FROM activities WHERE account_id = ? "
+                "ORDER BY start_time", (account_id,),
+            ).fetchall()
+        return [TrendPoint(r[0], r[1] or 0.0, r[2], r[3], r[4], bool(r[5])) for r in rows]
+
     def load(self, activity_id: str, account_id: str = "local") -> ActivityResult | None:
         with self._connect() as conn:
             act = conn.execute(
-                "SELECT distance_m, observed_pace, np_pace, cost_grade, cost_heat, cost_wind "
-                "FROM activities WHERE account_id = ? AND activity_id = ?",
+                "SELECT distance_m, observed_pace, np_pace, cost_grade, cost_heat, cost_wind, "
+                "start_time FROM activities WHERE account_id = ? AND activity_id = ?",
                 (account_id, activity_id),
             ).fetchone()
             if act is None:
@@ -178,4 +199,17 @@ class ResultStore:
         return ActivityResult(
             observed_pace=act[1], np_pace=act[2], cost_grade=act[3], cost_heat=act[4],
             cost_wind=act[5], distance_m=act[0], segments=segments,
+            start_time=act[6] or 0.0,
         )
+
+
+@dataclass(frozen=True)
+class TrendPoint:
+    """One activity on the NP-over-time axis (FR-9.3)."""
+
+    activity_id: str
+    start_time: float  # epoch seconds
+    distance_m: float
+    observed_pace: float  # s/km
+    np_pace: float  # s/km
+    provisional: bool

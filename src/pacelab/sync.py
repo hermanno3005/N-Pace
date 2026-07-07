@@ -13,6 +13,10 @@ from pacelab.weather.service import WeatherUnavailable
 
 _PARSEABLE = {".fit", ".gpx"}
 
+# PaceLab's models are running physics (Minetti grade, running heat curve, running drag
+# area) — only run-type activities are analysed. intervals.icu uses Strava-style types.
+_RUN_TYPES = {"Run", "TrailRun"}
+
 
 def sync(provider, service, store: ResultStore, config: Config, oldest: str, newest: str,
          account_id: str, reprocess: bool = False, provisional_service=None) -> list[tuple[str, str]]:
@@ -25,6 +29,7 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
       and republished
     - ``"publish-failed"`` — analyzed and stored, but the annotation write failed
       (best-effort: retried by the next sync/publish run)
+    - ``"not-a-run"`` — a ride/swim/etc.; running physics don't apply, never downloaded
     - ``"skip"`` — already current in the store; not even downloaded
     - ``"no-file"`` — provider has no downloadable original (e.g. Strava-synced)
     - ``"no-track"`` — original has no usable GPS track (treadmill, strength; FR-1.4)
@@ -33,6 +38,9 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
     """
     outcomes: list[tuple[str, str]] = []
     for ref in provider.list_activities(oldest, newest):
+        if ref.type not in _RUN_TYPES:
+            outcomes.append((ref.id, "not-a-run"))
+            continue
         was_provisional = store.is_provisional(ref.id, account_id=account_id)
         if (not reprocess and not was_provisional
                 and store.is_current(ref.id, config.model_version, account_id)):
