@@ -1,5 +1,19 @@
 # Publish annotations by editing the Strava description (and intervals.icu note)
 
+> **Amended (July 2026): Strava is reached via the intervals.icu bridge, not direct OAuth.**
+> Strava's June 2026 developer-program update put Standard-tier API access behind a paid
+> Strava subscription (~$12/mo) with no free single-athlete path, killing the direct
+> write-back below for a free setup. But intervals.icu — a Strava partner — **pushes
+> activity name/description edits back to Strava** ("Update Strava name and description"
+> checkbox in its Settings → Strava box; see the research addendum). So PaceLab writes its
+> annotation to the **intervals.icu activity description only**, and the bridge carries it
+> to Strava. This deletes the OAuth machinery, token file, activity matching, and Strava
+> rate-limit handling designed below; that design is kept as the documented fallback if the
+> bridge breaks or a paid direct integration is ever wanted. One empirical caveat: edits
+> via the intervals.icu **API** (vs its UI) triggering the push is undocumented — verified
+> by a one-activity live test. Athlete-side setup: connect Strava in intervals.icu settings
+> and tick the checkbox.
+
 Each analysed run gets a public **annotation** — NP, observed pace, and the grade/heat/wind
 decomposition — written to two **publish targets**: the Strava activity **description** and
 the intervals.icu activity note. Research in `docs/research/strava-writeback.md`.

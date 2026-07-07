@@ -221,3 +221,101 @@ API Policy (<https://www.strava.com/legal/api_policy>):
   accessible callback URL** that echoes a GET challenge within seconds — wrong shape for a local
   CLI. **Recommendation: poll** `GET /athlete/activities?after=<last-run>` when PaceLab runs;
   at one athlete's volume this is nowhere near the rate limits.
+
+## Addendum: developer paywall and the intervals.icu bridge
+
+*(Added July 2026, after the athlete reported that creating an app at
+<https://www.strava.com/settings/api> now demands a paid subscription.)*
+
+### A. The paywall is real: Standard Tier API access now requires a Strava subscription
+
+Official announcement "An Update To Our Developer Program", Strava community hub Insider
+Journal, June 1, 2026
+(<https://communityhub.strava.com/insider-journal-9/an-update-to-our-developer-program-13428>),
+verbatim:
+
+> "A Strava subscription will be required to access the API as a Standard Tier developer."
+
+- **New developers**: effective **June 1, 2026** (immediately).
+- **Existing developers**: effective **June 30, 2026** — "Active developers without a current
+  subscription are entitled to 3-months free." (code sent by email). So it applies to existing
+  apps too, not only new ones.
+- **"Extended Access Tier developers are not affected"** — that tier (large partners, device
+  integrations) is exempt; it is not something a personal app can claim.
+- The requirement is the ordinary athlete subscription held by **the developer** (announcement
+  states no price; press coverage puts it at **$11.99/month** — e.g.
+  <https://www.heise.de/en/news/Strava-API-access-only-with-paid-subscription-in-the-future-11315017.html>,
+  <https://appsforstrava.com/blog/strava-developer-program-changes-2026/> — secondary sources).
+- Legal anchor: this is the API Policy §3.3 clause already quoted in §7 above ("Standard Tier
+  Applications are subject to subscription requirements …",
+  <https://www.strava.com/legal/api_policy>, effective June 1, 2026).
+- **No free path for a single-athlete personal app via the API.** The free alternatives the
+  announcement points at are read-only: bulk export ("every Strava athlete can still access and
+  download their data for free, at any time") and the new Strava MCP connector ("If you've been
+  using the API primarily to analyze your own data, this is built for you") — analysis, **no
+  write surface**. The §4 plan above (own app + OAuth) therefore now costs a subscription.
+
+### B. intervals.icu → Strava write-back exists — the bridge is real
+
+Contrary to the working hypothesis, intervals.icu **does** push name/description edits back to
+Strava, and has since 2020. Primary sources, all posts by developer **david** on
+<https://forum.intervals.icu>:
+
+> "You can now edit the activity name, description, type and the commute and trainer flags
+> from within Intervals.icu and changes will show up in Strava."
+> — david, 9 Jul 2020, <https://forum.intervals.icu/t/edit-activity-name-and-description/1308>
+
+- **Setting**: checkbox in the Strava box at `/settings` — "There is a new checkbox in the
+  Strava box in /settings" … "Note that this works both ways. If you untick that and change the
+  name of the activity on Strava, then the change will not be applied to the Intervals.icu
+  activity." — david, 20 Jan 2024,
+  <https://forum.intervals.icu/t/dont-update-rider-description-and-title-when-changing-in-intervals-icu/37439>.
+  The setting is known in threads as **"Update Strava name and description"**.
+- **Computed text already flows intervals→Strava**: intervals.icu writes its weather summary
+  into the Strava description ("Just text in the description. I had a look in the logs and
+  Intervals.icu is attempting to update Strava with the weather." — david, 19 May 2025,
+  <https://forum.intervals.icu/t/solved-intervals-weather-on-strava/101166>), and as of
+  **22 May 2026** the content is configurable: "You can now choose exactly which weather
+  features go into the Strava description" — david,
+  <https://forum.intervals.icu/t/configure-strava-weather-description/130120>. That is
+  per-activity computed text flowing intervals.icu → Strava — exactly PaceLab's shape.
+- **No david statement forbidding write-back was found**; searches for partner-terms
+  restrictions turned up the opposite (the features above). The only directional limitation
+  david describes is the *other* way: Strava→intervals description sync is unreliable because
+  "Strava doesn't send Intervals.icu an update when it changes" and "it is expensive in terms
+  of limited Strava API calls to poll for changes"
+  (<https://forum.intervals.icu/t/strava-descriptions-no-longer-coming-across/115562>).
+- **Post-paywall status**: the configurable-weather feature shipped 22 May 2026; June/July 2026
+  forum threads about the Strava API changes
+  (<https://forum.intervals.icu/t/strava-api-update-new-terms-subs-required-for-api-access/130240>)
+  discuss impact on *other* developers' apps, with no announcement that intervals.icu (an
+  established partner, unaffected Extended-tier shape) lost write-back.
+
+**Caveats for PaceLab using the bridge**:
+
+1. **Trigger type matters.** Manual UI edits propagate ("If i manually change name/description
+   of an activity from intervals.icu, I see the change propagate to Strava correctly"), but
+   automatic renames from planned-workout pairing do **not**
+   (<https://forum.intervals.icu/t/activity-name-intervals-strava-not-updating-when-triggered-by-planned-workout-pairing/109035>,
+   no david reply). **Whether a description `PUT` via the intervals.icu API triggers the Strava
+   push is not documented anywhere found — test empirically** with one activity before relying
+   on it.
+2. The athlete must connect Strava on intervals.icu with write permission ("give Intervals.icu
+   permission to update your activities using the 'Connect with Strava' button") and tick
+   "Update Strava name and description"; a stale authorization silently drops the push (fixed by
+   re-authorizing, per forum reports).
+3. intervals.icu itself may append its weather block to the same Strava description — PaceLab's
+   marker-based splice (§2) should tolerate that.
+
+### C. Other free paths: none found
+
+- **Klimat** custom templates compose from "a list of 30+ data metrics" (weather fields,
+  <https://klimat.app/faq>) — not arbitrary user-supplied per-activity text, and no
+  user-facing webhook/API to inject content.
+- No service was found that accepts user-pushed per-activity text and posts it to Strava.
+- **Strava MCP** is read/analysis only.
+
+**Bottom line**: the free write-back path is intervals.icu — PaceLab already writes there via
+API key; if the athlete connects Strava with write scope and enables "Update Strava name and
+description", intervals.icu description edits reach Strava (verify the API-edit trigger, caveat
+B.1). Otherwise, description write-back via PaceLab's own app costs a Strava subscription.

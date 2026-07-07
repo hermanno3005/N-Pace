@@ -75,8 +75,8 @@ never touches the athlete's own text).
 _Avoid_: share, upload, sync (that's ingestion).
 
 **Publish Target**:
-A remote surface an annotation is written to — v1: the Strava activity description and the
-intervals.icu activity note.
+A remote surface an annotation is written to — v1: the intervals.icu activity description,
+which doubles as the Strava surface via intervals.icu's push-to-Strava bridge (ADR-0011).
 _Avoid_: destination, sink.
 
 ### The cost model
