@@ -46,6 +46,7 @@ class ActivityResult:
     cost_wind: float  # s/km (reported, not applied)
     distance_m: float
     segments: list[SegmentResult]
+    start_time: float = 0.0  # epoch seconds of the first segment — the trend's date axis
 
 
 def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> ActivityResult:
@@ -90,4 +91,5 @@ def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> Activ
         cost_wind=cost_wind / total_km,
         distance_m=total_dist,
         segments=seg_results,
+        start_time=enriched[0][0].start_time,
     )
