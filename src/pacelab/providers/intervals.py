@@ -86,6 +86,26 @@ class IntervalsProvider:
             for a in activities
         ]
 
+    def _check(self, resp, what: str):
+        if resp.status == 429:
+            raise RateLimited(_retry_after(resp))
+        if resp.status != 200:
+            raise RuntimeError(f"intervals.icu {what} failed (HTTP {resp.status})")
+        return resp
+
+    def fetch_description(self, activity_id: str) -> str | None:
+        """The activity's current description — read before splicing (never clobber)."""
+        resp = self._check(self._http.get(f"{_BASE}/activity/{activity_id}", self._headers),
+                           f"read of {activity_id}")
+        return json.loads(resp.content).get("description")
+
+    def update_description(self, activity_id: str, text: str) -> None:
+        """Write the merged description back; intervals.icu's bridge carries it to Strava."""
+        body = json.dumps({"description": text}).encode()
+        headers = {**self._headers, "Content-Type": "application/json"}
+        self._check(self._http.put(f"{_BASE}/activity/{activity_id}", headers, body),
+                    f"description update of {activity_id}")
+
     def download(self, activity_id: str) -> Path | None:
         """Download an activity's original file into the account-keyed cache.
 

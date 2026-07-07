@@ -23,10 +23,12 @@ def _write_gpx(path):
 
 
 class StubProvider:
-    def __init__(self, refs, gpx_path):
+    def __init__(self, refs, gpx_path, publish_fails=False):
         self._refs = refs
         self._gpx = gpx_path
         self.downloaded = []
+        self.descriptions = {}
+        self._publish_fails = publish_fails
 
     def list_activities(self, oldest, newest):
         return self._refs
@@ -34,6 +36,14 @@ class StubProvider:
     def download(self, activity_id):
         self.downloaded.append(activity_id)
         return self._gpx
+
+    def fetch_description(self, activity_id):
+        if self._publish_fails:
+            raise RuntimeError("intervals.icu down")
+        return self.descriptions.get(activity_id)
+
+    def update_description(self, activity_id, text):
+        self.descriptions[activity_id] = text
 
 
 class StubService:
@@ -76,6 +86,27 @@ def test_sync_marks_unparseable_formats_unsupported(tmp_path):
     assert store.load("i300", account_id="acct") is None
 
 
+def test_activity_without_weather_yet_is_deferred_not_stored(tmp_path):
+    # A run more recent than ERA5's publication lag can't be analysed yet — report it
+    # and leave nothing in the store, so the next sync retries it.
+    from pacelab.weather.service import WeatherUnavailable
+
+    class NoWeatherService:
+        def conditions_at(self, lat, lon, t):
+            raise WeatherUnavailable("no weather for 2026-07-05 yet")
+
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i500", "2026-07-05", "Run", "Night Laufen")], gpx)
+
+    outcomes = dict(sync(provider, NoWeatherService(), store, Config(), "2026-01-01",
+                         "2026-12-31", account_id="acct"))
+
+    assert outcomes["i500"] == "no-weather"
+    assert store.load("i500", account_id="acct") is None
+
+
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     gpx = tmp_path / "a.gpx"
     _write_gpx(gpx)
@@ -94,3 +125,21 @@ def test_sync_skips_current_downloads_new_and_stores(tmp_path):
     assert outcomes["i100"] == "skip"
     assert outcomes["i200"] == "ok"
     assert store.is_current("i200", Config().model_version, account_id="acct")
+    # Ambient publish (ADR-0011): the analysed run got its annotation written and marked.
+    assert "PaceLab" in provider.descriptions["i200"]
+    assert not store.needs_publish("i200", Config().model_version, account_id="acct")
+
+
+def test_publish_failure_does_not_fail_the_sync(tmp_path):
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider([ActivityRef("i200", "2024-07-02", "Run", "B")], gpx,
+                            publish_fails=True)
+
+    outcomes = dict(sync(provider, StubService(), store, Config(), "2024-01-01", "2024-12-31",
+                         account_id="acct"))
+
+    assert outcomes["i200"] == "publish-failed"  # analysed and stored, annotation pending
+    assert store.is_current("i200", Config().model_version, account_id="acct")
+    assert store.needs_publish("i200", Config().model_version, account_id="acct")

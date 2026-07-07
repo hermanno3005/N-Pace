@@ -20,6 +20,10 @@ CELL_DEGREES = 0.1
 _HourlySeries = list[tuple[float, Conditions]]
 
 
+class WeatherUnavailable(RuntimeError):
+    """No weather exists for this day (yet) — typically ERA5's ~week publication lag."""
+
+
 class Fetcher(Protocol):
     def fetch_hourly(self, lat: float, lon: float, day: str) -> _HourlySeries:
         """Return the hourly series for a cell on a given UTC day (the network boundary)."""
@@ -56,6 +60,12 @@ class WeatherService:
             series = _decode(json.loads(path.read_text()))
         else:
             series = self._fetcher.fetch_hourly(cell_lat, cell_lon, day)
+            if not series:
+                # ERA5 hasn't published this day yet. Cache NOTHING — a cached empty
+                # day would block the date forever once the archive catches up.
+                raise WeatherUnavailable(
+                    f"no weather for {day} yet (ERA5 lags ~a week) — retry in a few days"
+                )
             path.write_text(json.dumps(_encode(series)))
         self._memory[key] = series
         return series

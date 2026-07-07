@@ -23,6 +23,9 @@ class Http(Protocol):
     def get(self, url: str, headers: dict[str, str]) -> HttpResponse:
         ...
 
+    def put(self, url: str, headers: dict[str, str], body: bytes) -> HttpResponse:
+        ...
+
 
 # intervals.icu sits behind Cloudflare, which 403s (error 1010) the default urllib
 # User-Agent as a bot. A real UA is required.
@@ -35,8 +38,15 @@ class UrllibHttp:
         self._ssl = ssl.create_default_context(cafile=certifi.where())
 
     def get(self, url: str, headers: dict[str, str]) -> HttpResponse:
+        return self._request("GET", url, headers, None)
+
+    def put(self, url: str, headers: dict[str, str], body: bytes) -> HttpResponse:
+        return self._request("PUT", url, headers, body)
+
+    def _request(self, method: str, url: str, headers: dict[str, str],
+                 body: bytes | None) -> HttpResponse:
         headers = {"User-Agent": _USER_AGENT, **headers}
-        request = urllib.request.Request(url, headers=headers, method="GET")
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=self._timeout, context=self._ssl) as resp:
                 return HttpResponse(status=resp.status, content=resp.read(),
