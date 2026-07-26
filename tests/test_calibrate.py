@@ -38,8 +38,9 @@ def test_fit_k_grade_recovers_the_planted_sensitivity():
 
 
 def test_fit_k_grade_ignores_interval_runs():
-    runs = [synthetic_run(k=0.5)] * 6 + [run([(240.0 if i % 2 else 420.0, 0.02 * (i % 5))
-                                              for i in range(30)])] * 4
+    runs = [synthetic_run(k=0.5, start_time=j * 86400.0) for j in range(6)]
+    runs += [run([(240.0 if i % 2 else 420.0, 0.02 * (i % 5)) for i in range(30)],
+                 start_time=j * 86400.0) for j in range(6, 10)]
     fit = fit_k_grade(runs)
     assert fit.n_runs == 6  # intervals excluded by steadiness
     assert abs(fit.value - 0.5) < 0.02
@@ -61,3 +62,19 @@ def test_fit_wbgt_a_recovers_the_planted_coefficient():
     assert abs(fit.value - 0.001) < 0.0002
     assert fit.n_runs == 8
     assert fit.r2 > 0.95
+
+
+def test_fit_wbgt_a_abstains_when_every_run_shares_a_timestamp():
+    # A database migrated before start_time existed loads every activity at t=0.0, making
+    # the drift column a copy of the intercept. The design is singular: abstain (FR-8.2)
+    # rather than divide by a zero pivot.
+    from pacelab.models.wbgt import wbgt
+    from pacelab.weather.conditions import Conditions
+
+    runs = []
+    for temp in [2.0, 6.0, 10.0, 14.0, 18.0, 22.0, 26.0, 30.0]:
+        w = wbgt(Conditions(temp, 50.0, 0.0, 0.0, 0.0, 1013.0, 0.0))
+        pace = 300.0 * (1 + 0.001 * max(0.0, w - 7.2) ** 2)
+        runs.append(run([(pace, 0.0)] * 40, start_time=0.0, temp=temp))
+
+    assert fit_wbgt_a(runs, k_grade=0.4) is None

@@ -105,6 +105,10 @@ def segment_track(track: Track, step_m: float = 100.0, stop_speed_ms: float = ST
         wall = t1 - t0
         pause_time = min(sum(dt for pos, dt in pauses if d0 <= pos < d1), wall)
         moving_elapsed = wall - pause_time
+        # Unweighted mean over the points inside the window (the closing boundary point
+        # belongs to the next segment). Good enough for steadiness and a coarse effort
+        # cross-check; an HR-conditioned fit would want time-weighting, since irregular
+        # sampling biases a point-count mean.
         hrs = [p.hr for p, d in zip(points, cum) if d0 <= d < d1 and p.hr is not None]
         segments.append(
             Segment(

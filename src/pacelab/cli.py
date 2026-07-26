@@ -165,9 +165,9 @@ def _run_calibrate(args) -> int:
 
     account_id = Account.from_env().storage_id
     store = ResultStore(args.db)
-    results = [store.load(p.activity_id, account_id=account_id)
-               for p in store.np_trend(account_id=account_id)]
-    steady = sum(1 for r in results if r and is_steady(r))
+    results = [r for r in (store.load(p.activity_id, account_id=account_id)
+                           for p in store.np_trend(account_id=account_id)) if r]
+    steady = sum(1 for r in results if is_steady(r))
     print(f"{len(results)} analysed runs · {steady} steady (calibration input)\n")
 
     k = fit_k_grade(results)
@@ -175,7 +175,7 @@ def _run_calibrate(args) -> int:
         print(f"k_grade : insufficient data — keeping default {DEFAULT_GRADE_SENSITIVITY}")
     else:
         print(f"k_grade : {k.value:.3f}   (default {DEFAULT_GRADE_SENSITIVITY}; "
-              f"IQR ±{k.spread / 2:.3f} over {k.n_runs} hilly steady runs)")
+              f"IQR {k.spread:.3f} over {k.n_runs} hilly steady runs)")
 
     a = fit_wbgt_a(results, k_grade=k.value if k else DEFAULT_GRADE_SENSITIVITY)
     if a is None:

@@ -94,9 +94,9 @@ def fit_k_grade(results: list[ActivityResult], min_grade_std: float = 0.015) -> 
 
 
 def _run_wbgt(result: ActivityResult) -> float | None:
-    """Distance-weighted mean WBGT over segments that have solar data."""
+    """Distance-weighted mean WBGT over moving segments that have solar data."""
     total_d = total = 0.0
-    for s in result.segments:
+    for s in _moving(result):
         if s.solar_radiation_wm2 is None:
             continue
         c = Conditions(s.temperature_c, s.humidity_pct, s.wind_speed_ms, s.wind_dir_deg,
@@ -127,16 +127,25 @@ def fit_wbgt_a(results: list[ActivityResult], k_grade: float,
 
     # 3-param LSQ: y = b0 + b1·t + b2·w2, solved via normal equations.
     def solve3(rows):
-        import itertools
         X = [(1.0, t, w2) for t, w2, _ in rows]
         y = [p for _, _, p in rows]
         A = [[sum(xi[i] * xi[j] for xi in X) for j in range(3)] for i in range(3)]
         v = [sum(xi[i] * yi for xi, yi in zip(X, y)) for i in range(3)]
+        # A pivot that vanishes relative to the matrix scale means the design is singular
+        # or near-singular — e.g. every run carrying the same timestamp (a database
+        # migrated before start_time existed loads them all as 0.0), which makes the drift
+        # column a copy of the intercept. Unidentifiable, so report nothing rather than
+        # dividing by ~0 and returning noise.
+        scale = max(abs(a) for row in A for a in row)
+        if scale == 0:
+            return None
         # Gaussian elimination
         for col in range(3):
             pivot = max(range(col, 3), key=lambda r_: abs(A[r_][col]))
             A[col], A[pivot] = A[pivot], A[col]
             v[col], v[pivot] = v[pivot], v[col]
+            if abs(A[col][col]) <= 1e-12 * scale:
+                return None
             for r_ in range(col + 1, 3):
                 f = A[r_][col] / A[col][col]
                 for c_ in range(col, 3):
@@ -147,7 +156,10 @@ def fit_wbgt_a(results: list[ActivityResult], k_grade: float,
             b[i] = (v[i] - sum(A[i][j] * b[j] for j in range(i + 1, 3))) / A[i][i]
         return b
 
-    b0, b1, b2 = solve3(rows)
+    coeffs = solve3(rows)
+    if coeffs is None:
+        return None
+    b0, b1, b2 = coeffs
     if b0 <= 0:
         return None
     preds = [b0 + b1 * t + b2 * w2 for t, w2, _ in rows]
