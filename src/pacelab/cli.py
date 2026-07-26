@@ -158,8 +158,14 @@ def _run_trend(args) -> int:
     return 0
 
 
+def _fmt(value: float | None) -> str:
+    return f"{value:.5f}" if value is not None else "n/a"
+
+
 def _run_calibrate(args) -> int:
-    from pacelab.calibrate import fit_k_grade, fit_wbgt_a, is_steady
+    from pacelab.calibrate import (
+        fit_hr_conditioned_wbgt_a, fit_k_grade, fit_wbgt_a, is_steady,
+    )
     from pacelab.models.grade import DEFAULT_GRADE_SENSITIVITY
     from pacelab.models.heat import DEFAULT_WBGT_A
 
@@ -183,6 +189,19 @@ def _run_calibrate(args) -> int:
     else:
         print(f"wbgt_a  : {a.value:.5f} (default {DEFAULT_WBGT_A}; R²={a.r2:.2f}, "
               f"residual ±{a.spread:.1f} s/km over {a.n_runs} steady runs)")
+
+    # The HR-conditioned cut (ADR-0014): pace at equal HR, hot vs cool. Intent-proof, so
+    # it is the one the findings doc treats as decisive.
+    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k.value if k else DEFAULT_GRADE_SENSITIVITY)
+    if hr is None:
+        print("wbgt_a  : (at equal HR) insufficient data/spread, or HR and heat too "
+              "collinear to separate")
+    else:
+        print(f"wbgt_a  : {hr.value:.5f} at equal HR — {hr.n_runs} runs / "
+              f"{hr.n_segments} segments")
+        print(f"          run-mean refit {_fmt(hr.run_mean_value)}, "
+              f"HR {hr.hr_coeff:+.2f} s/km per bpm, corr(HR, heat) {hr.hr_wbgt_corr:+.2f}")
+        print(f"          R²={hr.r2:.2f} — optimistic, segments within a run correlate")
     print("\nreport only — nothing applied (FR-8.2). Review before tuning config.")
     return 0
 

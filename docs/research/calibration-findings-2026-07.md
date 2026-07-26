@@ -23,8 +23,16 @@ Three estimates of the same coefficient:
 | estimate | value | meaning |
 |---|---|---|
 | no time term | 0.00046 | raw hot-slower signal, fitness change included |
-| linear drift term | 0.00008 | drift term eats the heat signal (collinear) |
+| ~~linear drift term~~ | ~~0.00008~~ | **withdrawn — see below** |
 | **21-day hot/cool pairs (n=38)** | **0.00014** | cleanest causal cut: nearby-in-time contrast |
+
+> **The 0.00008 figure is withdrawn.** `fit_wbgt_a` normalised the heat coefficient by the
+> regression intercept, i.e. by pace extrapolated back to 1 Jan 1970 — with a drift term
+> and real epoch timestamps that is wrong by roughly 4×, and the drift row is the only one
+> of the three affected (the others have no time term). Fixed by normalising against the
+> mean heat-removed pace, which does not depend on where the time axis is anchored.
+> **This row needs a rerun against the athlete's database before it means anything.** The
+> conclusion below rests on the windowed estimate, which the bug did not touch.
 
 One season's WBGT rises monotonically with date, so heat and fitness drift are nearly
 collinear — a single season cannot fully separate them (El Helou had 60 marathons). But the
@@ -33,7 +41,11 @@ ADR-0010's sun-double-count caveat: the WBGT curve likely over-penalizes this at
 
 **Decisive next test before changing anything: the HR-conditioned fit** — pace at equal HR
 on hot vs cool days (intent-proof: deliberately jogging in heat can't masquerade as a heat
-penalty). HR is persisted per segment as of model 0.2.1, so this is now computable.
+penalty). HR is persisted per segment as of model 0.2.1, and the fit is now built
+(ADR-0014, `pacelab calibrate` reports it): it abstains when HR and heat turn out to be
+collinear, and reports the HR coefficient, the HR–heat correlation, and a run-mean refit
+alongside the estimate. **Not yet run against the athlete's database** — that run, plus the
+drift-row rerun above, is what this document is waiting on.
 
 ## Method lessons folded back
 
@@ -41,3 +53,6 @@ penalty). HR is persisted per segment as of model 0.2.1, so this is now computab
   run itself (fixed in 0.2.1) — variance-minimization doubles as a data-quality audit.
 - A single linear drift term is the wrong deconfounder for one monotonic season; windowed
   pairing is the honest structure for the heat fit.
+- A coefficient expressed as a *fraction* needs an explicit, origin-free baseline. Dividing
+  by a regression intercept quietly imports whatever the other covariates extrapolate to at
+  zero — here, the athlete's pace half a century before he was running.
