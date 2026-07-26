@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS segments (
     pace_np       REAL,
     stopped       INTEGER,
     solar_radiation_wm2 REAL,
+    avg_hr        REAL,
     PRIMARY KEY (account_id, activity_id, idx)
 );
 """
@@ -70,6 +71,9 @@ class ResultStore:
             conn.execute("ALTER TABLE activities ADD COLUMN provisional INTEGER DEFAULT 0")
         if "start_time" not in columns:
             conn.execute("ALTER TABLE activities ADD COLUMN start_time REAL")
+        seg_columns = {r[1] for r in conn.execute("PRAGMA table_info(segments)")}
+        if "avg_hr" not in seg_columns:
+            conn.execute("ALTER TABLE segments ADD COLUMN avg_hr REAL")
 
     @staticmethod
     def _migrate_v01(conn: sqlite3.Connection) -> None:
@@ -90,7 +94,7 @@ class ResultStore:
             "ALTER TABLE segments RENAME TO segments_v01;"
             + _SCHEMA +
             "INSERT INTO activities SELECT 'local', *, NULL, 0, NULL FROM activities_v01;"
-            "INSERT INTO segments SELECT 'local', s.*, NULL FROM segments_v01 s;"
+            "INSERT INTO segments SELECT 'local', s.*, NULL, NULL FROM segments_v01 s;"
             "DROP TABLE activities_v01;"
             "DROP TABLE segments_v01;"
         )
@@ -114,12 +118,12 @@ class ResultStore:
                  model_version, int(provisional), result.start_time),
             )
             conn.executemany(
-                "INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO segments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     (account_id, activity_id, s.idx, s.distance, s.grade, s.elapsed,
                      s.temperature_c, s.humidity_pct, s.wind_speed_ms, s.wind_dir_deg,
                      s.p_grade, s.p_heat, s.p_wind, s.pace_obs, s.pace_np, int(s.stopped),
-                     s.solar_radiation_wm2)
+                     s.solar_radiation_wm2, s.avg_hr)
                     for s in result.segments
                 ],
             )
@@ -187,13 +191,13 @@ class ResultStore:
             rows = conn.execute(
                 "SELECT idx, distance, grade, elapsed, temperature_c, humidity_pct, "
                 "wind_speed_ms, wind_dir_deg, p_grade, p_heat, p_wind, pace_obs, pace_np, "
-                "stopped, solar_radiation_wm2 "
+                "stopped, solar_radiation_wm2, avg_hr "
                 "FROM segments WHERE account_id = ? AND activity_id = ? ORDER BY idx",
                 (account_id, activity_id),
             ).fetchall()
         segments = [
             SegmentResult(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9],
-                          r[10], r[11], r[12], bool(r[13]), r[14])
+                          r[10], r[11], r[12], bool(r[13]), r[14], r[15])
             for r in rows
         ]
         return ActivityResult(

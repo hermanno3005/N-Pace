@@ -38,3 +38,4 @@ class Segment:
     lon: float  # midpoint longitude
     start_time: float  # seconds, at the segment's start
     stopped: bool = False  # flagged when the runner was paused/stationary (FR-2.4)
+    hr: float | None = None  # mean heart rate over the segment, when the source has it

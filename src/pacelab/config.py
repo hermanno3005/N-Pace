@@ -39,5 +39,6 @@ class Config:
     # Whether wind enters the applied NP (ADR-0005: off by default)
     apply_wind: bool = False
     # Stamps results for reproducibility / idempotent re-runs (FR-10.2).
-    # v0.2 switched the heat index Heat Index → WBGT (ADR-0010).
-    model_version: str = "0.2.0"
+    # 0.2.0: heat index → WBGT (ADR-0010). 0.2.1: remainder-segment merge + solar
+    # actually persisted in the weather cache (both change stored numbers).
+    model_version: str = "0.2.1"
