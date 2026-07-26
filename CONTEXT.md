@@ -21,7 +21,10 @@ _Avoid_: predicted pace, target pace.
 **Effort**:
 The physiological work rate held constant across the normalization — the thing that is
 assumed equal between the observed run and its normalized counterpart. NP answers "same
-effort, reference conditions, what pace?"
+effort, reference conditions, what pace?" **In heat calibration, effort is operationalised
+as heart rate** (ADR-0014): the heat penalty is the pace decrement needed to hold a given HR
+as conditions worsen. This is a calibration measurement choice, not a redefinition of NP,
+which is still computed from the physics.
 _Avoid_: intensity, exertion (when the specific held-constant quantity is meant).
 
 ### Ingestion

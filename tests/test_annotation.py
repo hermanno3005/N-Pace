@@ -62,6 +62,16 @@ def test_splice_replaces_a_previous_block_instead_of_stacking():
     assert out.count(MARKER) == 1
 
 
+def test_strip_removes_our_block_and_keeps_the_athletes_text():
+    from pacelab.publish.annotation import strip_annotation
+
+    block = render_annotation(result())
+    assert strip_annotation(f"My race notes.\n\n{block}") == "My race notes."
+    assert strip_annotation(block) == ""
+    assert strip_annotation("Just my words.") == "Just my words."
+    assert strip_annotation(None) == ""
+
+
 def test_splice_is_idempotent():
     block = render_annotation(result())
     once = splice_annotation("Notes.", block)

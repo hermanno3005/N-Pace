@@ -35,6 +35,8 @@ class SegmentResult:
     # Per-segment solar (ADR-0006: persist per-segment conditions). None doubles as the
     # confidence tag for the Heat Index fallback (ADR-0010): no solar data → HI was used.
     solar_radiation_wm2: float | None = None
+    # Mean heart rate — calibration's steadiness detector and effort cross-check.
+    avg_hr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class ActivityResult:
     cost_wind: float  # s/km (reported, not applied)
     distance_m: float
     segments: list[SegmentResult]
+    start_time: float = 0.0  # epoch seconds of the first segment — the trend's date axis
 
 
 def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> ActivityResult:
@@ -75,7 +78,7 @@ def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> Activ
             wind_speed_ms=c.wind_speed_ms, wind_dir_deg=c.wind_dir_deg,
             p_grade=cost.p_grade, p_heat=cost.p_heat, p_wind=cost.p_wind,
             pace_obs=pace_obs, pace_np=pace_np, stopped=s.stopped,
-            solar_radiation_wm2=c.solar_radiation_wm2,
+            solar_radiation_wm2=c.solar_radiation_wm2, avg_hr=s.hr,
         ))
 
     if total_dist == 0:
@@ -90,4 +93,5 @@ def analyze(enriched: list[tuple[Segment, Conditions]], config: Config) -> Activ
         cost_wind=cost_wind / total_km,
         distance_m=total_dist,
         segments=seg_results,
+        start_time=enriched[0][0].start_time,
     )

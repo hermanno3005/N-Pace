@@ -59,10 +59,11 @@ def _write_trackless_gpx(path):
 
 
 def test_sync_skips_activities_with_no_gps_track(tmp_path):
+    # A treadmill run is type Run but has no GPS — flagged, not stored (FR-1.4).
     empty = tmp_path / "empty.gpx"
     _write_trackless_gpx(empty)
     store = ResultStore(tmp_path / "db")
-    provider = StubProvider([ActivityRef("i900", "2024-07-01", "WeightTraining", "Gym")], empty)
+    provider = StubProvider([ActivityRef("i900", "2024-07-01", "Run", "Treadmill")], empty)
 
     outcomes = dict(sync(provider, StubService(), store, Config(), "2024-01-01", "2024-12-31",
                          account_id="acct"))
@@ -176,6 +177,32 @@ def test_finalized_activity_is_then_skipped(tmp_path):
                          account_id="acct", provisional_service=StubService()))
 
     assert outcomes["i500"] == "skip"
+
+
+def test_non_run_activities_are_ignored_without_downloading(tmp_path):
+    # PaceLab's physics are running physics (Minetti grade, running heat curve) — a bike
+    # ride analysed with them is wrong on every axis. Only outdoor runs pass; nothing is
+    # downloaded for the rest (rate-limit friendly).
+    gpx = tmp_path / "a.gpx"
+    _write_gpx(gpx)
+    store = ResultStore(tmp_path / "db")
+    provider = StubProvider(
+        [ActivityRef("i600", "2026-07-03", "Ride", "München Rennrad"),
+         ActivityRef("i601", "2026-07-04", "TrailRun", "Morning Trailrun"),
+         ActivityRef("i602", "2026-07-04", "VirtualRide", "Zwift"),
+         ActivityRef("i603", "2026-07-05", None, "Mystery")],
+        gpx,
+    )
+
+    outcomes = dict(sync(provider, StubService(), store, Config(), "2026-01-01", "2026-12-31",
+                         account_id="acct"))
+
+    assert outcomes["i600"] == "not-a-run"
+    assert outcomes["i602"] == "not-a-run"
+    assert outcomes["i603"] == "not-a-run"
+    assert outcomes["i601"] == "ok"  # trail runs are runs
+    assert provider.downloaded == ["i601"]  # rides never downloaded
+    assert store.load("i600", account_id="acct") is None
 
 
 def test_sync_skips_current_downloads_new_and_stores(tmp_path):

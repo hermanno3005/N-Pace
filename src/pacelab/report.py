@@ -1,6 +1,26 @@
 """Human-readable summary + per-segment table, and JSON export (FR-9.2/9.1)."""
 
+from datetime import datetime, timezone
+
 from pacelab.analyze import ActivityResult
+
+
+def format_trend(points) -> str:
+    """The NP-over-time table (FR-9.3): fitness with conditions stripped out.
+
+    `Δ` is what the normalization removed (observed − NP); `~` marks provisional
+    analyses that will finalize once the weather archive catches up.
+    """
+    lines = [f"{'date':<12} {'km':>6} {'obs':>6} {'NP':>7} {'Δ':>5}"]
+    for p in points:
+        day = datetime.fromtimestamp(p.start_time, tz=timezone.utc).date().isoformat()
+        mark = "~" if p.provisional else " "
+        delta = p.observed_pace - p.np_pace
+        lines.append(
+            f"{day:<12} {p.distance_m / 1000:>6.1f} {pace(p.observed_pace):>6} "
+            f"{mark}{pace(p.np_pace):>6} {delta:>+5.0f}"
+        )
+    return "\n".join(lines)
 
 
 def pace(sec_per_km: float) -> str:

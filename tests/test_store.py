@@ -81,6 +81,15 @@ def test_opening_a_v01_database_migrates_it(tmp_path):
     assert store.load("new1") == make_result()
 
 
+def test_segment_heart_rate_round_trips(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+    seg = SegmentResult(0, 100.0, 0.0, 30.0, 20.0, 50.0, 2.0, 180.0, 0.0, 0.01, 0.0,
+                        300.0, 297.0, False, 650.0, avg_hr=152.5)
+    result = ActivityResult(300.0, 297.0, 0.0, 3.0, 0.0, 100.0, [seg])
+    store.save("hr", result, model_version="0.2.0")
+    assert store.load("hr").segments[0].avg_hr == 152.5
+
+
 def test_segment_solar_radiation_round_trips(tmp_path):
     # Per-segment solar is persisted (ADR-0006: per-segment conditions); NULL marks the
     # Heat Index fallback (ADR-0010's confidence tag).
@@ -102,6 +111,16 @@ def test_provisional_flag_round_trips_and_clears_on_final_save(tmp_path):
     store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
     assert not store.is_provisional("act1", account_id="acct")
     assert not store.is_provisional("ghost", account_id="acct")  # unknown → not provisional
+
+
+def test_delete_removes_activity_and_segment_rows(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), model_version="0.2.0", account_id="acct")
+
+    store.delete("act1", account_id="acct")
+
+    assert store.load("act1", account_id="acct") is None
+    assert not store.is_current("act1", "0.2.0", account_id="acct")
 
 
 def test_publish_state_tracks_the_model_version(tmp_path):
