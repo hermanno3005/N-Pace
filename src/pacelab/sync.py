@@ -5,13 +5,11 @@ friendly). A rate limit (429) raises `RateLimited` and aborts the sync rather th
 hammering the remaining activities.
 """
 
-from pacelab.app import analyze_file
+from pacelab.app import PARSEABLE_SUFFIXES, analyze_file
 from pacelab.config import Config
 from pacelab.publish.publisher import try_publish
 from pacelab.store import ResultStore
 from pacelab.weather.service import WeatherUnavailable
-
-_PARSEABLE = {".fit", ".gpx"}
 
 # PaceLab's models are running physics (Minetti grade, running heat curve, running drag
 # area) — only run-type activities are analysed. intervals.icu uses Strava-style types.
@@ -50,7 +48,7 @@ def sync(provider, service, store: ResultStore, config: Config, oldest: str, new
         if path is None:
             outcomes.append((ref.id, "no-file"))
             continue
-        if path.suffix.lower() not in _PARSEABLE:
+        if path.suffix.lower() not in PARSEABLE_SUFFIXES:
             # Cached (it's the user's data) but not parseable — never feed e.g. a TCX
             # to the GPX adapter.
             outcomes.append((ref.id, "unsupported"))

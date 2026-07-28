@@ -3,6 +3,7 @@
     pacelab analyze run.fit
     pacelab analyze activities/ --segments
     pacelab sync --from 2024-01-01
+    pacelab recompute [--force]
 
 Results go to SQLite; re-runs are idempotent (skipped unless the model version changed or
 --reprocess is given). `sync` needs INTERVALS_API_KEY in the environment.
@@ -20,6 +21,7 @@ from pacelab.config import Config
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
 from pacelab.publish.publisher import publish_range
+from pacelab.recompute import recompute
 from pacelab.report import format_segments, format_summary, format_trend, to_dict
 from pacelab.store import ResultStore
 from pacelab.sync import sync
@@ -108,6 +110,18 @@ class _SyncContext:
         print(f"synced {done} / {len(outcomes)} listed\n", flush=True)
         return outcomes
 
+    def reconcile(self, force: bool = False):
+        """The reconciliation pass (ADR-0016) — silent when the corpus is settled."""
+        outcomes = recompute(self.provider, self.service, self.store, self.config,
+                             self.account_id, force=force)
+        if not outcomes:
+            return outcomes  # nothing drifted: the every-tick pass says nothing
+        for activity_id, status in outcomes:
+            print(f"{status:14} {activity_id}")
+        done = sum(1 for _, s in outcomes if s == "ok")
+        print(f"recomputed {done} / {len(outcomes)} drifted\n", flush=True)
+        return outcomes
+
 
 def _run_sync(args) -> int:
     try:
@@ -118,13 +132,23 @@ def _run_sync(args) -> int:
     return 0
 
 
+def _run_recompute(args) -> int:
+    try:
+        _SyncContext(args).reconcile(force=args.force)
+    except RateLimited as e:
+        print(f"{e} — recomputed activities are saved; rerun to continue.", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _run_watch(args) -> int:
     from pacelab.watch import watch
 
     context = _SyncContext(args)
     print(f"pacelab watch: every {args.interval}s over the last {args.window_days} days",
           flush=True)
-    watch(context.run, interval_s=args.interval, window_days=args.window_days, ticks=args.ticks)
+    watch(context.run, interval_s=args.interval, window_days=args.window_days,
+          ticks=args.ticks, recompute_fn=None if args.no_recompute else context.reconcile)
     return 0
 
 
@@ -162,6 +186,24 @@ def _fmt(value: float | None) -> str:
     return f"{value:.5f}" if value is not None else "n/a"
 
 
+def _print_versions(counts: list[tuple[str, int]]) -> None:
+    """State which model versions the fit is reading — loudly when there is more than one.
+
+    A mixed corpus is harmless for a coefficient bump (calibration reads only raw
+    columns) and invalidating for a pipeline bump, and nothing here can tell which it
+    was. So calibrate still fits, but never silently (ADR-0016).
+    """
+    breakdown = ", ".join(f"{version or 'unversioned'} ({n})" for version, n in counts)
+    if len(counts) > 1:
+        print(f"!! MIXED MODEL VERSIONS: {breakdown}")
+        print("   harmless for a coefficient re-tune, not for a pipeline change — "
+              "run `pacelab recompute`\n")
+    elif counts:
+        print(f"model version {counts[0][0] or 'unversioned'}\n")
+    else:
+        print()
+
+
 def _run_calibrate(args) -> int:
     from pacelab.calibrate import (
         fit_hr_conditioned_wbgt_a, fit_k_grade, fit_wbgt_a, is_steady,
@@ -174,7 +216,8 @@ def _run_calibrate(args) -> int:
     results = [r for r in (store.load(p.activity_id, account_id=account_id)
                            for p in store.np_trend(account_id=account_id)) if r]
     steady = sum(1 for r in results if is_steady(r))
-    print(f"{len(results)} analysed runs · {steady} steady (calibration input)\n")
+    print(f"{len(results)} analysed runs · {steady} steady (calibration input)")
+    _print_versions(store.version_counts(account_id=account_id))
 
     k = fit_k_grade(results)
     if k is None:
@@ -226,9 +269,18 @@ def main(argv: list[str] | None = None) -> int:
     publish_p.add_argument("--to", dest="newest", default=date.today().isoformat(), help="newest date")
     _add_common(publish_p)
 
+    recompute_p = sub.add_parser(
+        "recompute", help="re-analyse and republish every drifted activity (ADR-0016)"
+    )
+    recompute_p.add_argument("--force", action="store_true",
+                             help="reprocess every stored activity, drifted or not")
+    _add_common(recompute_p)
+
     from pacelab.watch import DEFAULT_INTERVAL_S, DEFAULT_WINDOW_DAYS
 
     watch_p = sub.add_parser("watch", help="poll intervals.icu and keep annotations current")
+    watch_p.add_argument("--no-recompute", action="store_true",
+                         help="skip the reconciliation pass at the top of each tick")
     watch_p.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_S,
                          help="seconds between ticks")
     watch_p.add_argument("--window-days", type=int, default=DEFAULT_WINDOW_DAYS,
@@ -248,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_sync(args)
     if args.command == "publish":
         return _run_publish(args)
+    if args.command == "recompute":
+        return _run_recompute(args)
     if args.command == "watch":
         return _run_watch(args)
     if args.command == "trend":

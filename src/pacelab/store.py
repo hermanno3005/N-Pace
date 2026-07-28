@@ -161,6 +161,42 @@ class ResultStore:
                 (model_version, account_id, activity_id),
             )
 
+    def needs_recompute(self, model_version: str, account_id: str = "local") -> list[str]:
+        """Activity ids whose stored row disagrees with itself (ADR-0016).
+
+        Drift is a query, not a stored marker, so it cannot go stale and it describes a
+        half-finished pass correctly for free. Three ways a row drifts: it was stamped at
+        an older model version, it is a forecast-tier preview awaiting the archive, or it
+        is stored current but was never annotated at this version.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT activity_id FROM activities WHERE account_id = ? "
+                "AND (model_version != ? OR provisional = 1 OR published_version IS NOT ?) "
+                "ORDER BY start_time, activity_id",
+                (account_id, model_version, model_version),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def activity_ids(self, account_id: str = "local") -> list[str]:
+        """Every stored activity for an account — what a forced recompute walks."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT activity_id FROM activities WHERE account_id = ? "
+                "ORDER BY start_time, activity_id", (account_id,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def version_counts(self, account_id: str = "local") -> list[tuple[str, int]]:
+        """Rows per model version, most common first — calibrate's mixed-corpus check."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT model_version, COUNT(*) FROM activities WHERE account_id = ? "
+                "GROUP BY model_version ORDER BY COUNT(*) DESC, model_version DESC",
+                (account_id,),
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
     def is_current(self, activity_id: str, model_version: str, account_id: str = "local") -> bool:
         with self._connect() as conn:
             row = conn.execute(
