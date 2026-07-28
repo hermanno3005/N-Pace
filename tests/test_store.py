@@ -173,3 +173,55 @@ def test_results_are_isolated_by_account(tmp_path):
     assert store.load("i100", account_id="bob") == bob
     assert store.is_current("i100", "0.1.0", account_id="alice")
     assert not store.is_current("i100", "0.1.0", account_id="carol")
+
+
+def _seed_corpus(store):
+    """One row of each state the recompute enumeration must classify (ADR-0016)."""
+    store.save("settled", make_result(), "0.2.1", account_id="acct")
+    store.mark_published("settled", "0.2.1", account_id="acct")
+    store.save("stale", make_result(), "0.2.0", account_id="acct")
+    store.mark_published("stale", "0.2.0", account_id="acct")
+    store.save("prov", make_result(), "0.2.1", account_id="acct", provisional=True)
+    store.mark_published("prov", "0.2.1", account_id="acct")
+    store.save("unpublished", make_result(), "0.2.1", account_id="acct")
+    store.save("elsewhere", make_result(), "0.2.0", account_id="local")
+
+
+def test_needs_recompute_enumerates_every_kind_of_drift(tmp_path):
+    # ADR-0016: stale version, provisional preview, or stored-but-never-annotated.
+    store = ResultStore(tmp_path / "pacelab.db")
+    _seed_corpus(store)
+
+    assert store.needs_recompute("0.2.1", "acct") == ["prov", "stale", "unpublished"]
+
+
+def test_needs_recompute_is_scoped_to_one_account(tmp_path):
+    # Rows under other accounts (e.g. "local" files) have no provider to recompute from.
+    store = ResultStore(tmp_path / "pacelab.db")
+    _seed_corpus(store)
+
+    assert store.needs_recompute("0.2.1", "local") == ["elsewhere"]
+
+
+def test_needs_recompute_goes_quiet_on_a_settled_corpus(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.save("act1", make_result(), "0.2.1", account_id="acct")
+    store.mark_published("act1", "0.2.1", account_id="acct")
+
+    assert store.needs_recompute("0.2.1", "acct") == []
+
+
+def test_activity_ids_lists_the_whole_account_corpus(tmp_path):
+    # What --force walks: every row, drifted or not.
+    store = ResultStore(tmp_path / "pacelab.db")
+    _seed_corpus(store)
+
+    assert store.activity_ids("acct") == ["prov", "settled", "stale", "unpublished"]
+
+
+def test_version_counts_reports_the_corpus_breakdown(tmp_path):
+    # calibrate's header: is this fit reading one model version or several (ADR-0016)?
+    store = ResultStore(tmp_path / "pacelab.db")
+    _seed_corpus(store)
+
+    assert store.version_counts("acct") == [("0.2.1", 3), ("0.2.0", 1)]

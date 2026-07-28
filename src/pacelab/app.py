@@ -17,6 +17,10 @@ from pacelab.weather.conditions import Conditions
 from pacelab.weather.enrich import enrich
 
 
+# The formats a source adapter exists for — every other original is cached but not read.
+PARSEABLE_SUFFIXES = {".fit", ".gpx"}
+
+
 class ConditionsSource(Protocol):
     def conditions_at(self, lat: float, lon: float, t: float) -> Conditions:
         ...

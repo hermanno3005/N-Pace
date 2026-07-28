@@ -84,15 +84,25 @@ _Avoid_: destination, sink.
 
 **Watch**:
 The always-on polling loop that keeps annotations current without manual syncs: every tick
-it syncs a rolling window, so new runs get annotated within minutes and provisional
-analyses finalize as the archive catches up. Runs as a container on the home server.
+it **recomputes** the drifted corpus, then syncs a rolling window, so new runs get
+annotated within minutes and provisional analyses finalize as the archive catches up.
+Runs as a container on the home server.
 _Avoid_: daemon, cron job, webhook (we poll; see ADR-0013).
+
+**Recompute**:
+The reconciliation pass over the stored corpus (ADR-0016): every row that disagrees with
+itself — stale `model_version`, still provisional, or never annotated — is re-analysed
+against the **archive tier only**, saved, and republished, one activity at a time. Driven
+by a query over the store, not by a provider listing: nothing new is discovered, which is
+what separates it from a **sync**. This is how a coefficient re-tune reaches history.
+_Avoid_: backfill, reprocess, migration, resync.
 
 **Provisional Analysis**:
 An analysis computed from forecast-tier weather because the run is more recent than the
 reanalysis archive's publication lag. A preview, marked with a tilde in its annotation,
 never disk-cached, and automatically **finalized** — recomputed against the pinned archive
-and republished — by a later sync.
+and republished — by a later sync, or by the **recompute** pass once it has fallen out of
+watch's window.
 _Avoid_: draft, estimate, preliminary result.
 
 ### The cost model
