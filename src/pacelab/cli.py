@@ -4,6 +4,7 @@
     pacelab analyze activities/ --segments
     pacelab sync --from 2024-01-01
     pacelab recompute [--force]
+    pacelab snapshot
 
 Results go to SQLite; re-runs are idempotent (skipped unless the model version changed or
 --reprocess is given). `sync` needs INTERVALS_API_KEY in the environment.
@@ -23,6 +24,7 @@ from pacelab.providers.intervals import IntervalsProvider, RateLimited
 from pacelab.publish.publisher import publish_range
 from pacelab.recompute import recompute
 from pacelab.report import format_segments, format_summary, format_trend, to_dict
+from pacelab.snapshot import KEEP, SnapshotError, write_snapshot
 from pacelab.store import ResultStore
 from pacelab.sync import sync
 from pacelab.weather.forecast import ForecastFetcher
@@ -35,6 +37,8 @@ _SUFFIXES = {".fit", ".gpx"}
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
     p.add_argument("--cache-dir", type=Path, default=Path(".cache"), help="cache root (weather + activities)")
+    p.add_argument("--snapshots-dir", type=Path, default=Path("snapshots"),
+                   help="where corpus snapshots are written (ADR-0018)")
     p.add_argument("--json-dir", type=Path, default=None, help="also export per-activity JSON here")
     p.add_argument("--segments", action="store_true", help="print the per-segment table")
     p.add_argument("--apply-wind", action="store_true", help="include wind in the applied NP")
@@ -110,10 +114,17 @@ class _SyncContext:
         print(f"synced {done} / {len(outcomes)} listed\n", flush=True)
         return outcomes
 
+    def snapshot(self):
+        """Snapshot the corpus (ADR-0018). Raises — the caller must not rewrite on failure."""
+        archive = write_snapshot(self.args.db, self.args.cache_dir / "weather",
+                                 self.args.snapshots_dir)
+        print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)", flush=True)
+        return archive
+
     def reconcile(self, force: bool = False):
         """The reconciliation pass (ADR-0016) — silent when the corpus is settled."""
         outcomes = recompute(self.provider, self.service, self.store, self.config,
-                             self.account_id, force=force)
+                             self.account_id, force=force, before_rewrite=self.snapshot)
         if not outcomes:
             return outcomes  # nothing drifted: the every-tick pass says nothing
         for activity_id, status in outcomes:
@@ -138,6 +149,19 @@ def _run_recompute(args) -> int:
     except RateLimited as e:
         print(f"{e} — recomputed activities are saved; rerun to continue.", file=sys.stderr)
         return 1
+    return 0
+
+
+def _run_snapshot(args) -> int:
+    """Write one verified snapshot by hand — the mitigation for curation between bumps."""
+    try:
+        archive = write_snapshot(args.db, args.cache_dir / "weather", args.snapshots_dir,
+                                 keep=args.keep)
+    except SnapshotError as e:
+        print(f"snapshot failed: {e}", file=sys.stderr)
+        return 1
+    print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)")
+    print(f"pull it with: scp <pi>:{args.snapshots_dir}/latest.tar.gz .")
     return 0
 
 
@@ -276,6 +300,13 @@ def main(argv: list[str] | None = None) -> int:
                              help="re-analyse every stored activity, drifted or not")
     _add_common(recompute_p)
 
+    snapshot_p = sub.add_parser(
+        "snapshot", help="write a verified corpus snapshot, keeping the last 10 (ADR-0018)"
+    )
+    snapshot_p.add_argument("--keep", type=int, default=KEEP,
+                            help="how many snapshots to retain")
+    _add_common(snapshot_p)
+
     from pacelab.watch import DEFAULT_INTERVAL_S, DEFAULT_WINDOW_DAYS
 
     watch_p = sub.add_parser("watch", help="poll intervals.icu and keep annotations current")
@@ -302,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_publish(args)
     if args.command == "recompute":
         return _run_recompute(args)
+    if args.command == "snapshot":
+        return _run_snapshot(args)
     if args.command == "watch":
         return _run_watch(args)
     if args.command == "trend":

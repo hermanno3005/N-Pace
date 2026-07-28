@@ -10,6 +10,8 @@ import time
 import warnings
 from datetime import date, timedelta
 
+from pacelab.snapshot import SnapshotError
+
 DEFAULT_INTERVAL_S = 900  # 15 min: ~annotation-within-minutes at 96 listing calls/day
 DEFAULT_WINDOW_DAYS = 14  # comfortably covers ERA5's ~week lag, so provisionals finalize
 
@@ -21,12 +23,24 @@ def tick(sync_fn, window_days: int, today: date | None = None, recompute_fn=None
     first and against the archive tier only (ADR-0016), so a provisional still inside
     ERA5's lag falls through to sync's forecast tier in this same tick. It is optional:
     ``pacelab watch --no-recompute`` disables a misbehaving pass without stopping the loop.
+
+    A recompute failure is contained and the sync still runs — except for a failed corpus
+    snapshot, which fails the tick entire (ADR-0018).
     """
     today = today or date.today()
     oldest = (today - timedelta(days=window_days)).isoformat()
     if recompute_fn is not None:
         try:
             recompute_fn()
+        except SnapshotError as e:
+            # The one failure that is not contained (ADR-0018). The snapshot exists to
+            # protect a whole-corpus rewrite; recomputing without it removes the
+            # protection at the single moment it was built for, and a Pi that cannot
+            # write 1.8 MB is broken in a way that should be loud. So the tick fails
+            # entire — sync included — and the corpus stays untouched for the next one.
+            warnings.warn(f"snapshot failed ({e}) — tick aborted, corpus untouched",
+                          stacklevel=2)
+            return None
         except Exception as e:  # noqa: BLE001 — the pass must not take the sync down
             warnings.warn(f"recompute failed ({e}) — syncing anyway", stacklevel=2)
     try:

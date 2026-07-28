@@ -22,7 +22,7 @@ from pacelab.weather.service import WeatherUnavailable
 
 
 def recompute(provider, service, store: ResultStore, config: Config, account_id: str,
-              force: bool = False) -> list[tuple[str, str]]:
+              force: bool = False, before_rewrite=None) -> list[tuple[str, str]]:
     """Re-analyse and republish every drifted row for one account.
 
     Outcomes per activity, in `sync()`'s vocabulary:
@@ -39,9 +39,17 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
 
     ``force`` walks every stored row regardless of drift — what a pipeline change wants,
     and how to exercise a bump without editing ``config.py``.
+
+    ``before_rewrite`` runs once, before the first row is touched, and only when this pass
+    will actually rewrite rows — the corpus snapshot (ADR-0018). It is deliberately not
+    guarded: if it raises, the pass aborts with the corpus untouched, which is the whole
+    point of taking it.
     """
     activity_ids = (store.activity_ids(account_id) if force
                     else store.needs_recompute(config.model_version, account_id))
+    if before_rewrite is not None and _rewrites_rows(store, activity_ids, config,
+                                                     account_id, force):
+        before_rewrite()
     outcomes: list[tuple[str, str]] = []
     for activity_id in activity_ids:
         was_provisional = store.is_provisional(activity_id, account_id=account_id)
@@ -76,3 +84,23 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
         else:
             outcomes.append((activity_id, "finalized" if was_provisional else "ok"))
     return outcomes
+
+
+def _rewrites_rows(store: ResultStore, activity_ids: list[str], config: Config,
+                   account_id: str, force: bool) -> bool:
+    """True when this pass will replace stored rows — i.e. a ``model_version`` bump.
+
+    Deliberately narrower than "the pass found work", because two kinds of enumerated row
+    recur on ordinary weeks and neither is destructive. A publish-only retry (stored
+    current, annotation still owed) rewrites no row at all and is enumerated on *every*
+    pass until intervals.icu accepts the write. A provisional finalization at the current
+    version replaces one preview whose loss costs a re-analysis, not data. Snapshotting on
+    either would fire the guard weekly at the aged SD card, for events it was not built for.
+
+    What is left is the event ADR-0018 names: a row stamped at an older version, i.e. a
+    ``model_version`` bump about to rewrite the whole corpus at once.
+    """
+    return bool(activity_ids) and (
+        force or any(not store.is_current(a, config.model_version, account_id)
+                     for a in activity_ids)
+    )

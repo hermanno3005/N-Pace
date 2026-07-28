@@ -56,7 +56,8 @@ def test_calibrate_states_the_single_version_quietly(tmp_path, capsys):
 def test_recompute_command_runs_the_pass(tmp_path, capsys, monkeypatch):
     calls = {}
 
-    def fake_recompute(provider, service, store, config, account_id, force=False):
+    def fake_recompute(provider, service, store, config, account_id, force=False,
+                       before_rewrite=None):
         calls["account_id"] = account_id
         calls["force"] = force
         return [("i1", "ok"), ("i2", "publish-failed")]
@@ -110,3 +111,50 @@ def test_watch_recomputes_unless_told_not_to(tmp_path, monkeypatch):
 
     assert main([*argv, "--no-recompute"]) == 0
     assert passed["recompute_fn"] is None
+
+
+def test_snapshot_command_writes_a_verified_archive(tmp_path, capsys):
+    # The manual half of ADR-0018: run it by hand after curating, since curation between
+    # bumps is exactly what the automatic trigger does not capture.
+    db = tmp_path / "pacelab.db"
+    store = ResultStore(db)
+    store.save("i1", _result(1.0), Config().model_version, account_id=ACCOUNT)
+    weather = tmp_path / ".cache" / "weather"
+    weather.mkdir(parents=True)
+    (weather / "48.0_9.0_2026-07-04.json").write_text("[]")
+
+    assert main(["snapshot", "--db", str(db), "--cache-dir", str(tmp_path / ".cache"),
+                 "--snapshots-dir", str(tmp_path / "snapshots")]) == 0
+
+    archives = list((tmp_path / "snapshots").glob("*.tar.gz"))
+    assert len(archives) == 2  # the stamped archive plus the latest.tar.gz symlink
+    assert "snapshot" in capsys.readouterr().out
+
+
+def test_a_failed_snapshot_is_a_failed_command(tmp_path, capsys):
+    # Reporting success for a backup that was never written is the worst outcome here.
+    assert main(["snapshot", "--db", str(tmp_path / "absent.db"),
+                 "--cache-dir", str(tmp_path / ".cache"),
+                 "--snapshots-dir", str(tmp_path / "snapshots")]) == 1
+    assert "absent.db" in capsys.readouterr().err
+
+
+def test_the_recompute_pass_is_handed_a_snapshot_to_take(tmp_path, monkeypatch):
+    # The wiring ADR-0018 asks for: the trigger lives inside the pass, so both the watch
+    # loop and a manual `pacelab recompute` are protected by the same code path.
+    seen = {}
+
+    def fake_recompute(*args, force=False, before_rewrite=None, **kwargs):
+        seen["before_rewrite"] = before_rewrite
+        return []
+
+    monkeypatch.setattr("pacelab.cli.recompute", fake_recompute)
+    assert main(["recompute", "--db", str(tmp_path / "pacelab.db"),
+                 "--cache-dir", str(tmp_path),
+                 "--snapshots-dir", str(tmp_path / "snapshots")]) == 0
+
+    db = tmp_path / "pacelab.db"
+    ResultStore(db).save("i1", _result(1.0), Config().model_version, account_id=ACCOUNT)
+    seen["before_rewrite"]()  # what the pass calls before it rewrites the first row
+
+    assert list((tmp_path / "snapshots").glob("*.tar.gz"))
