@@ -158,3 +158,24 @@ def test_the_recompute_pass_is_handed_a_snapshot_to_take(tmp_path, monkeypatch):
     seen["before_rewrite"]()  # what the pass calls before it rewrites the first row
 
     assert list((tmp_path / "snapshots").glob("*.tar.gz"))
+
+
+def test_a_failed_snapshot_fails_the_recompute_command(tmp_path, capsys, monkeypatch):
+    # The manual half of "the recompute must not run": exit non-zero, say why, and say
+    # plainly that nothing was recomputed.
+    from pacelab.snapshot import SnapshotError
+
+    def failing_snapshot(*args, **kwargs):
+        raise SnapshotError("no space left on device")
+
+    monkeypatch.setattr("pacelab.cli.write_snapshot", failing_snapshot)
+    db = tmp_path / "pacelab.db"
+    store = ResultStore(db)
+    store.save("i1", _result(1.0), "0.2.0", account_id=ACCOUNT)  # stale: a bump to rewrite
+
+    assert main(["recompute", "--db", str(db), "--cache-dir", str(tmp_path),
+                 "--snapshots-dir", str(tmp_path / "snapshots")]) == 1
+
+    err = capsys.readouterr().err
+    assert "no space left on device" in err
+    assert "nothing was recomputed" in err

@@ -210,3 +210,44 @@ def test_a_missing_database_fails_loudly(tmp_path):
     # Snapshotting nothing and reporting success is the worst possible outcome.
     with pytest.raises(SnapshotError):
         write_snapshot(tmp_path / "absent.db", tmp_path / "weather", _snapshots(tmp_path))
+
+
+def test_keeping_none_is_refused_rather_than_pruning_the_new_archive(tmp_path):
+    # --keep 0 would delete the snapshot just written and leave latest.tar.gz dangling:
+    # a reported success with nothing behind it, which is the one outcome to avoid.
+    db, weather = _corpus(tmp_path)
+
+    with pytest.raises(SnapshotError, match="at least 1"):
+        write_snapshot(db, weather, _snapshots(tmp_path), keep=0)
+
+    assert not _snapshots(tmp_path).exists() or list(_snapshots(tmp_path).glob("*.tar.gz")) == []
+
+
+def test_a_weather_cache_outside_the_data_root_still_restores_into_place(tmp_path):
+    # Member paths are resolved against the db's directory — the data root the restore
+    # extracts over. A cache elsewhere must not become an absolute or ../ member.
+    db, _ = _corpus(tmp_path)
+    elsewhere = tmp_path.parent / "weather-elsewhere"
+    elsewhere.mkdir(exist_ok=True)
+    (elsewhere / "48.0_9.0_2026-07-04.json").write_text("[]")
+
+    archive = write_snapshot(db, elsewhere, _snapshots(tmp_path))
+
+    with tarfile.open(archive) as tar:
+        names = tar.getnames()
+    assert ".cache/weather-elsewhere/48.0_9.0_2026-07-04.json" in names
+    assert not any(n.startswith(("/", "..")) for n in names)
+
+
+def test_two_snapshots_in_the_same_minute_are_both_kept(tmp_path):
+    # Curate, then `pacelab snapshot` by hand, right after the loop took one: the manual
+    # snapshot must not silently replace the automatic one.
+    from datetime import datetime, timedelta, timezone
+
+    db, weather = _corpus(tmp_path)
+    at = datetime(2026, 7, 28, 20, 15, 0, tzinfo=timezone.utc)
+    first = write_snapshot(db, weather, _snapshots(tmp_path), now=at)
+    second = write_snapshot(db, weather, _snapshots(tmp_path), now=at + timedelta(seconds=20))
+
+    assert first != second
+    assert first.exists() and second.exists()

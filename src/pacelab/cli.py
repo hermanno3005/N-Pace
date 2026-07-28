@@ -37,12 +37,24 @@ _SUFFIXES = {".fit", ".gpx"}
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
     p.add_argument("--cache-dir", type=Path, default=Path(".cache"), help="cache root (weather + activities)")
-    p.add_argument("--snapshots-dir", type=Path, default=Path("snapshots"),
-                   help="where corpus snapshots are written (ADR-0018)")
     p.add_argument("--json-dir", type=Path, default=None, help="also export per-activity JSON here")
     p.add_argument("--segments", action="store_true", help="print the per-segment table")
     p.add_argument("--apply-wind", action="store_true", help="include wind in the applied NP")
     p.add_argument("--reprocess", action="store_true", help="recompute even if already current")
+
+
+def _add_snapshots_dir(p: argparse.ArgumentParser) -> None:
+    """Only the three commands that can write a snapshot take this (ADR-0018)."""
+    p.add_argument("--snapshots-dir", type=Path, default=Path("snapshots"),
+                   help="where corpus snapshots are written")
+
+
+def _snapshot(args, keep: int = KEEP) -> Path:
+    """Write one verified snapshot and say where it landed. Raises on failure."""
+    archive = write_snapshot(args.db, args.cache_dir / "weather", args.snapshots_dir,
+                             keep=keep)
+    print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)", flush=True)
+    return archive
 
 
 def _weather(cache_dir: Path) -> WeatherService:
@@ -116,10 +128,7 @@ class _SyncContext:
 
     def snapshot(self):
         """Snapshot the corpus (ADR-0018). Raises — the caller must not rewrite on failure."""
-        archive = write_snapshot(self.args.db, self.args.cache_dir / "weather",
-                                 self.args.snapshots_dir)
-        print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)", flush=True)
-        return archive
+        return _snapshot(self.args)
 
     def reconcile(self, force: bool = False):
         """The reconciliation pass (ADR-0016) — silent when the corpus is settled."""
@@ -149,18 +158,20 @@ def _run_recompute(args) -> int:
     except RateLimited as e:
         print(f"{e} — recomputed activities are saved; rerun to continue.", file=sys.stderr)
         return 1
+    except SnapshotError as e:
+        # The corpus is untouched: the pass aborts before the first rewrite (ADR-0018).
+        print(f"snapshot failed: {e} — nothing was recomputed.", file=sys.stderr)
+        return 1
     return 0
 
 
 def _run_snapshot(args) -> int:
     """Write one verified snapshot by hand — the mitigation for curation between bumps."""
     try:
-        archive = write_snapshot(args.db, args.cache_dir / "weather", args.snapshots_dir,
-                                 keep=args.keep)
+        _snapshot(args, keep=args.keep)
     except SnapshotError as e:
         print(f"snapshot failed: {e}", file=sys.stderr)
         return 1
-    print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)")
     print(f"pull it with: scp <pi>:{args.snapshots_dir}/latest.tar.gz .")
     return 0
 
@@ -299,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     recompute_p.add_argument("--force", action="store_true",
                              help="re-analyse every stored activity, drifted or not")
     _add_common(recompute_p)
+    _add_snapshots_dir(recompute_p)
 
     snapshot_p = sub.add_parser(
         "snapshot", help="write a verified corpus snapshot, keeping the last 10 (ADR-0018)"
@@ -306,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     snapshot_p.add_argument("--keep", type=int, default=KEEP,
                             help="how many snapshots to retain")
     _add_common(snapshot_p)
+    _add_snapshots_dir(snapshot_p)
 
     from pacelab.watch import DEFAULT_INTERVAL_S, DEFAULT_WINDOW_DAYS
 
@@ -319,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     watch_p.add_argument("--ticks", type=int, default=None,
                          help="stop after N ticks (1 = cron-compatible single pass)")
     _add_common(watch_p)
+    _add_snapshots_dir(watch_p)
 
     trend_p = sub.add_parser("trend", help="NP over time — fitness with conditions stripped out")
     trend_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")

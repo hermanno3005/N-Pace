@@ -94,10 +94,11 @@ def test_watch_recomputes_on_every_tick():
     assert events == ["recompute", "sync", "recompute", "sync"]
 
 
-def test_a_failed_snapshot_fails_the_whole_tick(tmp_path):
+def test_a_failed_snapshot_fails_the_whole_tick():
     # ADR-0018: the snapshot guards the rewrite, so its failure is not contained the way
-    # an ordinary recompute failure is — sync does not run, the corpus is left untouched
-    # at the old model version, and the next tick retries.
+    # an ordinary recompute failure is. It propagates out of the tick — sync does not run,
+    # and a caller (ADR-0017's health handler) can tell this apart from a quiet tick,
+    # which a contained `return None` would not.
     from pacelab.snapshot import SnapshotError
 
     events = []
@@ -105,16 +106,14 @@ def test_a_failed_snapshot_fails_the_whole_tick(tmp_path):
     def unprotected_recompute():
         raise SnapshotError("no space left on device")
 
-    with pytest.warns(UserWarning, match="snapshot"):
-        outcomes = tick(lambda oldest, newest: events.append("sync") or [("i1", "ok")],
-                        window_days=14, today=date(2026, 7, 7),
-                        recompute_fn=unprotected_recompute)
+    with pytest.raises(SnapshotError):
+        tick(lambda oldest, newest: events.append("sync") or [("i1", "ok")],
+             window_days=14, today=date(2026, 7, 7), recompute_fn=unprotected_recompute)
 
     assert events == []  # not even the sync half ran
-    assert outcomes is None
 
 
-def test_the_loop_survives_a_failed_snapshot(tmp_path):
+def test_the_loop_survives_a_failed_snapshot():
     # Failing the tick must not mean failing the process: a Pi that recovers disk space
     # starts annotating again on its own, with nobody there.
     from pacelab.snapshot import SnapshotError

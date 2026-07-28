@@ -48,8 +48,13 @@ def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
     db_path, weather_dir, out_dir = Path(db_path), Path(weather_dir), Path(out_dir)
     if not db_path.exists():
         raise SnapshotError(f"no database at {db_path} — nothing to snapshot")
+    if keep < 1:
+        raise SnapshotError(f"keep must be at least 1, got {keep} — "
+                            "a snapshot that prunes itself is not a snapshot")
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H%MZ")
+    # Seconds, not just minutes: a hand-run snapshot straight after an automatic one is
+    # the expected case (curate, then snapshot), and it must not silently replace it.
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H%M%SZ")
     archive = out_dir / f"{stamp}.tar.gz"
 
     # Stage inside out_dir so the copy, the verification and the archive all land on one
@@ -62,7 +67,7 @@ def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
         if weather_dir.is_dir():
             staged_weather = Path(staging) / weather_dir.name
             shutil.copytree(weather_dir, staged_weather)
-            members.append((staged_weather, f"{weather_dir.parent.name}/{weather_dir.name}"))
+            members.append((staged_weather, _member_name(weather_dir, db_path.parent)))
         _write_archive(archive, members)
 
     _prune(out_dir, keep)
@@ -93,6 +98,20 @@ def verify_copy(copy_path: Path, source_path: Path) -> None:
             raise SnapshotError(
                 f"copied database has {copied[table]} {table[:-1]} rows, source has {n_source}"
             )
+
+
+def _member_name(path: Path, data_root: Path) -> str:
+    """Where ``path`` lands when the archive is extracted with ``-C <data root>``.
+
+    The db defines the data root, since it is the one file whose location the restore
+    must reproduce exactly. A weather cache kept somewhere else entirely still restores
+    to the layout the running container expects, rather than to an absolute path or one
+    escaping upwards with ``..``.
+    """
+    try:
+        return str(path.resolve().relative_to(data_root.resolve()))
+    except ValueError:
+        return str(Path(".cache") / path.name)
 
 
 def _counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -131,7 +150,7 @@ def _snapshots(out_dir: Path) -> list[Path]:
 
 
 def _prune(out_dir: Path, keep: int) -> None:
-    for old in _snapshots(out_dir)[:-keep] if keep > 0 else _snapshots(out_dir):
+    for old in _snapshots(out_dir)[:-keep]:  # keep >= 1 (checked before anything is written)
         old.unlink()
 
 

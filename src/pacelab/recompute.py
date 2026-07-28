@@ -101,6 +101,5 @@ def _rewrites_rows(store: ResultStore, activity_ids: list[str], config: Config,
     ``model_version`` bump about to rewrite the whole corpus at once.
     """
     return bool(activity_ids) and (
-        force or any(not store.is_current(a, config.model_version, account_id)
-                     for a in activity_ids)
+        force or store.has_stale_version(config.model_version, account_id)
     )

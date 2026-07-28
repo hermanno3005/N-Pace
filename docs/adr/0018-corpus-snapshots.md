@@ -75,7 +75,7 @@ broken to snapshot is also too broken to recompute, which is the event being gua
 
 ## One `.tar.gz` per snapshot, verified at write time
 
-    /data/snapshots/2026-07-28T2015Z.tar.gz     # host: /home/hermi/docker/pacelab/snapshots/
+    /data/snapshots/2026-07-28T201500Z.tar.gz   # host: /home/hermi/docker/pacelab/snapshots/
     /data/snapshots/latest.tar.gz -> ...
 
 The db is copied with Python's `sqlite3` backup API. A raw `cp` of a live SQLite file is not a
@@ -114,6 +114,15 @@ The residual gap is hand-curation between bumps, which is not captured until the
 Since curation is the irreplaceable part, the mitigation is procedural: run `pacelab snapshot`
 by hand after curating. It is the same command.
 
+**Refined while building it.** "Rows to rewrite" is narrower than "rows the pass enumerates",
+and the difference matters. ADR-0016's query also returns rows that are merely *unannotated* —
+a publish retry rewrites nothing and recurs on every pass until intervals.icu accepts the
+write — and provisional previews finalizing at the current version, which happens a few times
+a week and costs a re-analysis, not data. Snapshotting on either would fire several times a
+week and, worse, consume the ten retention slots with routine events, burying the pre-bump
+snapshot the depth exists for. So the implemented trigger is a stored `model_version` that
+differs from the running one (or `--force`, which rewrites everything by definition).
+
 ## Snapshot failure fails the tick
 
 If the snapshot cannot be written or does not verify, the exception propagates. ADR-0017's
@@ -123,6 +132,12 @@ next tick retries.
 
 Nothing is lost by stopping — ADR-0016's pass is derived from the store, so a skipped pass is
 indistinguishable from one that hasn't started yet. Progress halts; state does not corrupt.
+
+**ADR-0017 has not landed yet**, so there is no handler to catch the raise. Until it does,
+`watch()` itself logs it and sleeps to the next tick: the process must not die, or a Pi that
+recovers disk space never starts annotating again. The exception still propagates out of
+`tick()` — which is the seam ADR-0017's handler wraps — so a failed tick stays distinguishable
+from a quiet one, and adopting the health surface is a change to the caller, not to this.
 
 Rejected: logging the failure and recomputing anyway. That removes the protection at the single
 moment it was built for.
