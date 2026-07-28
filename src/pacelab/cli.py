@@ -118,7 +118,7 @@ class _SyncContext:
             return outcomes  # nothing drifted: the every-tick pass says nothing
         for activity_id, status in outcomes:
             print(f"{status:14} {activity_id}")
-        done = sum(1 for _, s in outcomes if s == "ok")
+        done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
         print(f"recomputed {done} / {len(outcomes)} drifted\n", flush=True)
         return outcomes
 
@@ -186,7 +186,7 @@ def _fmt(value: float | None) -> str:
     return f"{value:.5f}" if value is not None else "n/a"
 
 
-def _print_versions(counts: list[tuple[str, int]]) -> None:
+def _print_versions(counts: list[tuple[str | None, int]]) -> None:
     """State which model versions the fit is reading — loudly when there is more than one.
 
     A mixed corpus is harmless for a coefficient bump (calibration reads only raw
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         "recompute", help="re-analyse and republish every drifted activity (ADR-0016)"
     )
     recompute_p.add_argument("--force", action="store_true",
-                             help="reprocess every stored activity, drifted or not")
+                             help="re-analyse every stored activity, drifted or not")
     _add_common(recompute_p)
 
     from pacelab.watch import DEFAULT_INTERVAL_S, DEFAULT_WINDOW_DAYS

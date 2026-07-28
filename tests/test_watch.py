@@ -66,17 +66,19 @@ def test_tick_without_a_recompute_fn_only_syncs():
     assert events == ["sync"]
 
 
-def test_tick_contains_a_failing_recompute():
+def test_a_failing_recompute_does_not_take_the_sync_down():
+    # The pass is the newer, riskier half of the tick; sync must still annotate today's
+    # run. A shared outage fails the sync on its own, contained separately.
     events = []
 
     def broken_recompute():
-        raise RuntimeError("intervals.icu unreachable")
+        raise RuntimeError("recompute exploded")
 
-    outcomes = tick(lambda oldest, newest: events.append("sync"), window_days=14,
-                    today=date(2026, 7, 7), recompute_fn=broken_recompute)
+    outcomes = tick(lambda oldest, newest: events.append("sync") or [("i1", "ok")],
+                    window_days=14, today=date(2026, 7, 7), recompute_fn=broken_recompute)
 
-    assert outcomes is None
-    assert events == []  # the same outage would fail the sync too; next tick retries
+    assert events == ["sync"]
+    assert outcomes == [("i1", "ok")]
 
 
 def test_watch_recomputes_on_every_tick():

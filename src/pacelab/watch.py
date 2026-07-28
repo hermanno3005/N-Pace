@@ -24,9 +24,12 @@ def tick(sync_fn, window_days: int, today: date | None = None, recompute_fn=None
     """
     today = today or date.today()
     oldest = (today - timedelta(days=window_days)).isoformat()
-    try:
-        if recompute_fn is not None:
+    if recompute_fn is not None:
+        try:
             recompute_fn()
+        except Exception as e:  # noqa: BLE001 — the pass must not take the sync down
+            warnings.warn(f"recompute failed ({e}) — syncing anyway", stacklevel=2)
+    try:
         return sync_fn(oldest, today.isoformat())
     except Exception as e:  # noqa: BLE001 — the loop must survive anything transient
         warnings.warn(f"watch tick failed ({e}) — retrying next tick", stacklevel=2)

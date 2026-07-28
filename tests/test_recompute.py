@@ -97,7 +97,7 @@ def test_recompute_finalizes_a_stranded_provisional(tmp_path):
 
     outcomes = recompute(provider, ArchiveService(), store, config, ACCOUNT)
 
-    assert outcomes == [("i100", "ok")]
+    assert outcomes == [("i100", "finalized")]
     assert store.is_current("i100", config.model_version, account_id=ACCOUNT)
     assert not store.is_provisional("i100", account_id=ACCOUNT)
     assert not store.needs_publish("i100", config.model_version, account_id=ACCOUNT)
@@ -164,7 +164,7 @@ def test_a_settled_corpus_costs_one_query_and_no_downloads(tmp_path):
     assert provider.downloaded == []
 
 
-def test_force_reprocesses_rows_that_have_not_drifted(tmp_path):
+def test_force_re_analyses_rows_that_have_not_drifted(tmp_path):
     # Exercises a pipeline change without editing config.py.
     provider, store = _fixture(tmp_path)
     config = Config()
@@ -198,3 +198,19 @@ def test_an_unparseable_original_is_reported_not_fed_to_the_gpx_adapter(tmp_path
 
     assert recompute(provider, ArchiveService(), store, config, ACCOUNT) == [("i100", "unsupported")]
     assert store.is_current("i100", OLD_VERSION, account_id=ACCOUNT)
+
+
+def test_a_current_row_that_was_never_annotated_is_published_not_re_analysed(tmp_path):
+    # Analysis converges absolutely — once per activity per bump. A row whose publish
+    # keeps failing stays enumerated forever, so it must not re-download and re-analyse
+    # on every 15-minute tick as well.
+    provider, store = _fixture(tmp_path)
+    config = Config()
+    store.save("i100", _stub_result(), config.model_version, account_id=ACCOUNT)
+
+    outcomes = recompute(provider, ArchiveService(), store, config, ACCOUNT)
+
+    assert outcomes == [("i100", "ok")]
+    assert provider.downloaded == []
+    assert not store.needs_publish("i100", config.model_version, account_id=ACCOUNT)
+    assert store.load("i100", account_id=ACCOUNT).distance_m == 100.0  # stub, untouched

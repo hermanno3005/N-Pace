@@ -171,8 +171,10 @@ class ResultStore:
         """
         with self._connect() as conn:
             rows = conn.execute(
+                # IS NOT, not !=, on both version columns: a NULL version is the most
+                # drifted a row can be, and != would silently not match it.
                 "SELECT activity_id FROM activities WHERE account_id = ? "
-                "AND (model_version != ? OR provisional = 1 OR published_version IS NOT ?) "
+                "AND (model_version IS NOT ? OR provisional = 1 OR published_version IS NOT ?) "
                 "ORDER BY start_time, activity_id",
                 (account_id, model_version, model_version),
             ).fetchall()
@@ -187,7 +189,7 @@ class ResultStore:
             ).fetchall()
         return [r[0] for r in rows]
 
-    def version_counts(self, account_id: str = "local") -> list[tuple[str, int]]:
+    def version_counts(self, account_id: str = "local") -> list[tuple[str | None, int]]:
         """Rows per model version, most common first — calibrate's mixed-corpus check."""
         with self._connect() as conn:
             rows = conn.execute(

@@ -28,6 +28,8 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
     Outcomes per activity, in `sync()`'s vocabulary:
 
     - ``"ok"`` — re-analysed against the archive, stored, annotation republished
+    - ``"finalized"`` — a forecast-tier preview recomputed against the archive and
+      republished without its ``~`` mark
     - ``"publish-failed"`` — stored, but the annotation write failed; the row stays
       enumerated, so the next pass retries it (publishing retries forever)
     - ``"no-weather"`` — still inside the archive's publication lag; skipped untouched
@@ -42,6 +44,16 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
                     else store.needs_recompute(config.model_version, account_id))
     outcomes: list[tuple[str, str]] = []
     for activity_id in activity_ids:
+        was_provisional = store.is_provisional(activity_id, account_id=account_id)
+        if (not force and not was_provisional
+                and store.is_current(activity_id, config.model_version, account_id)):
+            # Stored current, only the annotation is missing. Analysis converges
+            # absolutely — it runs once per activity per bump (ADR-0016) — so a row that
+            # publishing keeps failing on is retried forever without being re-analysed.
+            published = try_publish(provider, store, activity_id, config.model_version,
+                                    account_id)
+            outcomes.append((activity_id, "ok" if published else "publish-failed"))
+            continue
         path = provider.download(activity_id)  # cache hit: originals are immutable
         if path is None:
             outcomes.append((activity_id, "no-file"))
@@ -59,5 +71,8 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
             continue
         store.save(activity_id, result, config.model_version, account_id=account_id)
         published = try_publish(provider, store, activity_id, config.model_version, account_id)
-        outcomes.append((activity_id, "ok" if published else "publish-failed"))
+        if not published:
+            outcomes.append((activity_id, "publish-failed"))
+        else:
+            outcomes.append((activity_id, "finalized" if was_provisional else "ok"))
     return outcomes
