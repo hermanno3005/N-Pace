@@ -88,6 +88,9 @@ def test_data_is_a_bind_mount_not_a_named_volume():
     sources = [str(v).rsplit(":/data", 1)[0] for v in service["volumes"] if ":/data" in str(v)]
     assert sources, "nothing is mounted at /data"
     assert all(s.startswith((".", "/", "$")) for s in sources), f"{sources} is not a host path"
+    # Not the directory holding this file: .env sits next to it, and /data is the one
+    # place the container writes.
+    assert all(s.rstrip("/") not in (".", "./") for s in sources), f"{sources} mounts .env"
 
 
 def test_publication_is_downstream_of_green_tests():

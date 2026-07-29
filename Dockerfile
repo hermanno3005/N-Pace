@@ -2,8 +2,8 @@
 #
 # Build contract: ADR-0015. uv.lock is the single source of truth for dependencies, every
 # base image is digest-pinned, and the container runs as uid 1000 because /data is a bind
-# mount on the Pi. Digests are bumped by hand — the tag in each trailing comment names the
-# thing pinned, it is not a fallback the build can drift to.
+# mount on the Pi. Digests are bumped by hand — the tag in the comment line above each
+# reference names the thing pinned, it is not a fallback the build can drift to.
 
 # --- build stage: resolve the venv from the lockfile ---
 # python:3.13-slim
