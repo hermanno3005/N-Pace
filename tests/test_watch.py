@@ -1,8 +1,26 @@
+import logging
 from datetime import date
 
 import pytest
 
 from pacelab.watch import tick, watch
+
+
+class FakeHeartbeat:
+    """Stands in for `ResultStore.record_tick` — the writer `tick()` is handed (ADR-0017).
+
+    It keeps the one piece of state the real one keeps: the failure streak it returns.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.failures = 0
+
+    def __call__(self, ok, summary=None, error=None, recomputed=False):
+        self.failures = 0 if ok else self.failures + 1
+        self.calls.append({"ok": ok, "summary": summary, "error": error,
+                           "recomputed": recomputed})
+        return self.failures
 
 
 def test_tick_syncs_a_rolling_window_ending_today():
@@ -127,8 +145,139 @@ def test_the_loop_survives_a_failed_snapshot():
             raise SnapshotError("no space left on device")
         events.append("recompute")
 
-    with pytest.warns(UserWarning, match="snapshot"):
-        watch(lambda oldest, newest: events.append("sync"), interval_s=900, window_days=14,
-              ticks=2, sleep=lambda s: None, recompute_fn=recompute_fn)
+    watch(lambda oldest, newest: events.append("sync"), interval_s=900, window_days=14,
+          ticks=2, sleep=lambda s: None, recompute_fn=recompute_fn)
 
     assert events == ["recompute", "sync"]  # tick 1 aborted, tick 2 ran in full
+
+
+# --- the heartbeat and the log (ADR-0017) -------------------------------------------
+
+
+def test_a_successful_tick_records_a_heartbeat():
+    beat = FakeHeartbeat()
+
+    tick(lambda oldest, newest: [("i1", "ok"), ("i2", "skip"), ("i3", "skip")],
+         window_days=14, today=date(2026, 7, 7), record_fn=beat)
+
+    assert beat.calls == [{"ok": True, "summary": "3 listed, 1 ok, 2 skip",
+                           "error": None, "recomputed": False}]
+
+
+def test_a_failed_tick_records_the_error():
+    # The failure branch is the only code that sees a failed pass — recording from inside
+    # the sync context would capture successes only.
+    beat = FakeHeartbeat()
+
+    def broken_sync(oldest, newest):
+        raise RuntimeError("intervals.icu unreachable")
+
+    assert tick(broken_sync, window_days=14, today=date(2026, 7, 7), record_fn=beat) is None
+
+    assert beat.calls == [{"ok": False, "summary": None,
+                           "error": "RuntimeError: intervals.icu unreachable",
+                           "recomputed": False}]
+
+
+def test_a_tick_that_recomputed_says_so():
+    # Only a pass with work to do: the pass runs every tick and is silent when the corpus
+    # is settled, so recording it as a recompute would make the field mean nothing.
+    worked, settled = FakeHeartbeat(), FakeHeartbeat()
+
+    tick(lambda o, n: [], window_days=14, today=date(2026, 7, 7),
+         recompute_fn=lambda: [("i1", "ok")], record_fn=worked)
+    tick(lambda o, n: [], window_days=14, today=date(2026, 7, 7),
+         recompute_fn=lambda: [], record_fn=settled)
+
+    assert worked.calls[0]["recomputed"] is True
+    assert settled.calls[0]["recomputed"] is False
+
+
+def test_a_contained_recompute_failure_still_counts_as_a_successful_tick(caplog):
+    # `consecutive_failures` counts escaping exceptions and nothing else. The pass failed,
+    # the sync annotated today's run — that tick did its job, and the log says the rest.
+    beat = FakeHeartbeat()
+
+    def broken_recompute():
+        raise RuntimeError("recompute exploded")
+
+    with caplog.at_level(logging.INFO, logger="pacelab.watch"):
+        tick(lambda o, n: [("i1", "ok")], window_days=14, today=date(2026, 7, 7),
+             recompute_fn=broken_recompute, record_fn=beat)
+
+    assert beat.calls[0]["ok"] is True
+    assert any("recompute exploded" in r.getMessage() for r in caplog.records)
+
+
+def test_a_failed_snapshot_is_recorded_before_it_propagates():
+    # It aborts the tick (ADR-0018), which makes it a failure like any other: a Pi that
+    # cannot write its snapshot must not read healthy while it stops recomputing.
+    from pacelab.snapshot import SnapshotError
+
+    beat = FakeHeartbeat()
+
+    def unprotected_recompute():
+        raise SnapshotError("no space left on device")
+
+    with pytest.raises(SnapshotError):
+        tick(lambda o, n: [], window_days=14, today=date(2026, 7, 7),
+             recompute_fn=unprotected_recompute, record_fn=beat)
+
+    assert beat.calls == [{"ok": False, "summary": None,
+                           "error": "SnapshotError: no space left on device",
+                           "recomputed": False}]
+
+
+def test_a_failure_streak_logs_a_traceback_once_then_one_liners(caplog):
+    # The deliberate inverse of the warnings.warn bug this replaced: repeats stay loud,
+    # but only the first one is worth reading in full.
+    beat = FakeHeartbeat()
+
+    def broken_sync(oldest, newest):
+        raise RuntimeError("expired API key")
+
+    with caplog.at_level(logging.INFO, logger="pacelab.watch"):
+        for _ in range(3):
+            tick(broken_sync, window_days=14, today=date(2026, 7, 7), record_fn=beat)
+
+    failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert [r.exc_info is not None for r in failures] == [True, False, False]
+    assert "3 consecutive" in failures[-1].getMessage()
+    assert "expired API key" in failures[-1].getMessage()
+
+
+def test_a_recovered_streak_gets_its_traceback_again(caplog):
+    # A second outage is a second thing to read: the streak resets, so the count does.
+    beat = FakeHeartbeat()
+    attempts = []
+
+    def flaky_sync(oldest, newest):
+        attempts.append(1)
+        if len(attempts) != 2:
+            raise RuntimeError("blip")
+        return []
+
+    with caplog.at_level(logging.INFO, logger="pacelab.watch"):
+        for _ in range(3):
+            tick(flaky_sync, window_days=14, today=date(2026, 7, 7), record_fn=beat)
+
+    failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert [r.exc_info is not None for r in failures] == [True, True]
+
+
+def test_the_loop_logs_a_failed_snapshot_rather_than_warning(caplog):
+    # warnings.warn printed once per unique (message, location) and then went silent —
+    # exactly backwards for a daemon, where the repetition is the signal.
+    from pacelab.snapshot import SnapshotError
+
+    def unprotected_recompute():
+        raise SnapshotError("no space left on device")
+
+    with caplog.at_level(logging.INFO, logger="pacelab.watch"):
+        watch(lambda o, n: [], interval_s=900, window_days=14, ticks=2,
+              sleep=lambda s: None, recompute_fn=unprotected_recompute,
+              record_fn=FakeHeartbeat())
+
+    failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(failures) == 2  # both ticks, not just the first
+    assert all("no space left on device" in r.getMessage() for r in failures)

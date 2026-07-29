@@ -24,3 +24,20 @@ services:
     # loudly on its first write rather than corrupting anything.
     # user: "${PUID}:${PGID}"
     restart: unless-stopped
+    # The probe lives here rather than in the image (ADR-0015/0017), so its cadence is
+    # tunable without republishing a tag the Pi follows unattended. `pacelab health` is
+    # the one implementation of the predicate — no successful tick within 3 × the loop's
+    # recorded interval, i.e. 45 min at the default 15-minute cadence — and its exit code
+    # is the whole interface. It reads the heartbeat row in /data/pacelab.db and resolves
+    # no account, so expired credentials show up as unhealthy instead of erroring.
+    #
+    # Nothing auto-acts on this yet: `restart: unless-stopped` does not restart unhealthy
+    # containers. It colours `docker ps` and gives a future notifier something to read.
+    healthcheck:
+      test: ["CMD", "pacelab", "health"]
+      interval: 5m
+      timeout: 10s
+      retries: 2
+      # Covers container start through the first tick landing, including the initial
+      # reconciliation pass over the whole corpus on a fresh model version.
+      start_period: 5m

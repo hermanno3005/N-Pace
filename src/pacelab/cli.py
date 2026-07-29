@@ -5,25 +5,35 @@
     pacelab sync --from 2024-01-01
     pacelab recompute [--force]
     pacelab snapshot
+    pacelab health
 
 Results go to SQLite; re-runs are idempotent (skipped unless the model version changed or
 --reprocess is given). `sync` needs INTERVALS_API_KEY in the environment.
+
+Two output channels, deliberately (ADR-0017). Report commands — `analyze`, `calibrate`,
+`trend`, `health` — `print()` the data a human asked for. `watch` is a daemon nobody is
+watching live, so everything it says goes through `logging` with a timestamp on it.
 """
 
 import argparse
 import json
+import logging
+import os
 import sys
+import time
 from datetime import date
+from functools import partial
 from pathlib import Path
 
 from pacelab.account import Account
 from pacelab.app import analyze_file
 from pacelab.config import Config
+from pacelab.health import format_health, is_healthy
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
 from pacelab.publish.publisher import publish_range
 from pacelab.recompute import recompute
-from pacelab.report import format_segments, format_summary, format_trend, to_dict
+from pacelab.report import format_line, format_segments, format_summary, format_trend, to_dict
 from pacelab.snapshot import KEEP, SnapshotError, write_snapshot
 from pacelab.store import ResultStore
 from pacelab.sync import sync
@@ -32,6 +42,8 @@ from pacelab.weather.open_meteo import OpenMeteoFetcher
 from pacelab.weather.service import WeatherService
 
 _SUFFIXES = {".fit", ".gpx"}
+
+log = logging.getLogger(__name__)
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -49,12 +61,16 @@ def _add_snapshots_dir(p: argparse.ArgumentParser) -> None:
                    help="where corpus snapshots are written")
 
 
-def _snapshot(args, keep: int = KEEP) -> Path:
+def _snapshot(args, keep: int = KEEP, say=None) -> Path:
     """Write one verified snapshot and say where it landed. Raises on failure."""
     archive = write_snapshot(args.db, args.cache_dir / "weather", args.snapshots_dir,
                              keep=keep)
-    print(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)", flush=True)
+    (say or _print)(f"snapshot {archive} ({archive.stat().st_size / 1024:.0f} KB)")
     return archive
+
+
+def _print(message: str) -> None:
+    print(message, flush=True)
 
 
 def _weather(cache_dir: Path) -> WeatherService:
@@ -94,10 +110,16 @@ def _run_analyze(args) -> int:
 
 
 class _SyncContext:
-    """Everything a sync pass needs, built once (weather memory-caches stay warm)."""
+    """Everything a sync pass needs, built once (weather memory-caches stay warm).
 
-    def __init__(self, args):
+    ``logged`` picks the output channel: `watch` sends every line through `logging` (one
+    per activity, not `_emit`'s block), a hand-run `sync`/`recompute` prints its report.
+    """
+
+    def __init__(self, args, logged: bool = False):
         self.args = args
+        self.say = log.info if logged else _print
+        self.logged = logged
         self.config = Config(apply_wind=args.apply_wind)
         account = Account.from_env()
         self.account_id = account.storage_id  # one key for store rows and FIT cache (ADR-0009)
@@ -115,20 +137,24 @@ class _SyncContext:
                         provisional_service=self.provisional)
         analysed = {"ok", "provisional", "finalized"}
         for activity_id, status in outcomes:
-            if status in analysed:
+            result = (self.store.load(activity_id, account_id=self.account_id)
+                      if status in analysed else None)
+            if self.logged:
+                line = f" — {format_line(result)}" if result else ""
+                self.say(f"{status:8} {activity_id}{line}")
+            elif result is not None:
                 if status != "ok":
                     print(f"[{status}]")
-                _emit(activity_id, self.store.load(activity_id, account_id=self.account_id),
-                      self.config, self.args)
+                _emit(activity_id, result, self.config, self.args)
             else:
                 print(f"{status:8} {activity_id}")
         done = sum(1 for _, s in outcomes if s in analysed)
-        print(f"synced {done} / {len(outcomes)} listed\n", flush=True)
+        self.say(f"synced {done} / {len(outcomes)} listed")
         return outcomes
 
     def snapshot(self):
         """Snapshot the corpus (ADR-0018). Raises — the caller must not rewrite on failure."""
-        return _snapshot(self.args)
+        return _snapshot(self.args, say=self.say)
 
     def reconcile(self, force: bool = False):
         """The reconciliation pass (ADR-0016) — silent when the corpus is settled."""
@@ -137,9 +163,9 @@ class _SyncContext:
         if not outcomes:
             return outcomes  # nothing drifted: the every-tick pass says nothing
         for activity_id, status in outcomes:
-            print(f"{status:14} {activity_id}")
+            self.say(f"{status:14} {activity_id}")
         done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
-        print(f"recomputed {done} / {len(outcomes)} drifted\n", flush=True)
+        self.say(f"recomputed {done} / {len(outcomes)} drifted")
         return outcomes
 
 
@@ -179,12 +205,27 @@ def _run_snapshot(args) -> int:
 def _run_watch(args) -> int:
     from pacelab.watch import watch
 
-    context = _SyncContext(args)
-    print(f"pacelab watch: every {args.interval}s over the last {args.window_days} days",
-          flush=True)
+    context = _SyncContext(args, logged=True)
+    log.info("pacelab watch: every %ss over the last %s days", args.interval,
+             args.window_days)
+    # The interval is bound into the writer rather than passed down through tick(): the
+    # loop's cadence is the caller's fact, and the reader derives its staleness threshold
+    # from it instead of assuming one (ADR-0017).
     watch(context.run, interval_s=args.interval, window_days=args.window_days,
-          ticks=args.ticks, recompute_fn=None if args.no_recompute else context.reconcile)
+          ticks=args.ticks, recompute_fn=None if args.no_recompute else context.reconcile,
+          record_fn=partial(context.store.record_tick, interval_s=args.interval))
     return 0
+
+
+def _run_health(args) -> int:
+    """Is the watch loop alive and succeeding? The compose HEALTHCHECK's whole interface.
+
+    Deliberately resolves no account: the heartbeat is unkeyed, so this reports broken
+    credentials instead of failing on them (ADR-0017).
+    """
+    beat = ResultStore(args.db).read_health()
+    print(format_health(beat, now=time.time()))
+    return 0 if is_healthy(beat, now=time.time()) else 1
 
 
 def _run_publish(args) -> int:
@@ -284,8 +325,25 @@ def _run_calibrate(args) -> int:
     return 0
 
 
+def _configure_logging(level: str) -> None:
+    """One stream, timestamped, UTC — the container carries no tz data (ADR-0017).
+
+    stdout rather than stderr: `docker logs` merges them, and a daemon's operational log
+    is its normal output, not an error channel. The level is set after `basicConfig`,
+    which is a no-op once a handler exists — so a second `main()` in the same process
+    (the tests) re-reads `--log-level` rather than silently keeping the first one.
+    """
+    logging.Formatter.converter = time.gmtime
+    logging.basicConfig(level=level.upper(), stream=sys.stdout,
+                        format="%(asctime)s %(levelname)-5s %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%SZ")
+    logging.getLogger().setLevel(level.upper())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pacelab", description="Environment-adjusted pace engine")
+    parser.add_argument("--log-level", default=os.environ.get("PACELAB_LOG_LEVEL", "INFO"),
+                        help="DEBUG, INFO, WARNING… (default $PACELAB_LOG_LEVEL or INFO)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     analyze = sub.add_parser("analyze", help="analyse a local FIT/GPX file or directory")
@@ -340,7 +398,13 @@ def main(argv: list[str] | None = None) -> int:
     cal_p = sub.add_parser("calibrate", help="fit personal coefficients (report only)")
     cal_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
 
+    health_p = sub.add_parser("health", help="is the watch loop alive and succeeding?")
+    health_p.add_argument("--db", type=Path, default=Path("pacelab.db"), help="results database")
+
     args = parser.parse_args(argv)
+    _configure_logging(args.log_level)
+    if args.command == "health":
+        return _run_health(args)
     if args.command == "sync":
         return _run_sync(args)
     if args.command == "publish":

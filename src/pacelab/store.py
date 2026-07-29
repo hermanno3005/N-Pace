@@ -6,6 +6,7 @@ version skips, a bumped version recomputes and replaces.
 """
 
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +50,20 @@ CREATE TABLE IF NOT EXISTS segments (
     solar_radiation_wm2 REAL,
     avg_hr        REAL,
     PRIMARY KEY (account_id, activity_id, idx)
+);
+-- The watch loop's heartbeat (ADR-0017): exactly one row, overwritten every tick. It is
+-- deliberately *not* keyed by account_id — it describes the process, not an account, so
+-- `pacelab health` can report broken credentials without needing credentials itself.
+CREATE TABLE IF NOT EXISTS health (
+    id                   INTEGER PRIMARY KEY CHECK (id = 1),
+    last_tick_at         REAL,
+    last_success_at      REAL,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_error           TEXT,
+    last_error_at        REAL,
+    last_recompute_at    REAL,
+    last_tick_summary    TEXT,
+    interval_s           INTEGER
 );
 """
 
@@ -221,6 +236,46 @@ class ResultStore:
             ).fetchone()
         return row is not None and row[0] == model_version
 
+    def record_tick(self, ok: bool, summary: str | None = None, error: str | None = None,
+                    recomputed: bool = False, interval_s: int | None = None,
+                    now: float | None = None) -> int:
+        """Overwrite the heartbeat with this tick, and return `consecutive_failures`.
+
+        `ok` means the tick raised nothing (ADR-0017) — a pass that completed while every
+        publish failed is a success that reports its degradation through `summary`. The
+        returned count is what `watch` uses to log a traceback once per streak.
+        """
+        at = time.time() if now is None else now
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_success_at, consecutive_failures, last_error, last_error_at, "
+                "last_recompute_at FROM health WHERE id = 1"
+            ).fetchone()
+            last_success_at, failures, last_error, last_error_at, last_recompute_at = (
+                row if row else (None, 0, None, None, None)
+            )
+            if ok:
+                last_success_at, failures = at, 0
+            else:
+                failures += 1
+                last_error, last_error_at = error, at
+            conn.execute(
+                "INSERT OR REPLACE INTO health VALUES (1,?,?,?,?,?,?,?,?)",
+                (at, last_success_at, failures, last_error, last_error_at,
+                 at if recomputed else last_recompute_at, summary, interval_s),
+            )
+        return failures
+
+    def read_health(self) -> "Heartbeat | None":
+        """The watch loop's last tick, or None when it has never run."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_tick_at, last_success_at, consecutive_failures, last_error, "
+                "last_error_at, last_recompute_at, last_tick_summary, interval_s "
+                "FROM health WHERE id = 1"
+            ).fetchone()
+        return Heartbeat(*row) if row else None
+
     def np_trend(self, account_id: str = "local") -> list["TrendPoint"]:
         """NP over time (FR-9.3): one point per stored activity, date-ordered."""
         with self._connect() as conn:
@@ -257,6 +312,24 @@ class ResultStore:
             cost_wind=act[5], distance_m=act[0], segments=segments,
             start_time=act[6] or 0.0,
         )
+
+
+@dataclass(frozen=True)
+class Heartbeat:
+    """What one watch tick left behind (ADR-0017). Timestamps are epoch seconds.
+
+    Derivable state (unpublished backlog, stale-version count) is deliberately absent: it
+    is a live query against `activities`, and a second copy here could disagree with it.
+    """
+
+    last_tick_at: float | None
+    last_success_at: float | None
+    consecutive_failures: int
+    last_error: str | None
+    last_error_at: float | None
+    last_recompute_at: float | None
+    last_tick_summary: str | None
+    interval_s: int | None
 
 
 @dataclass(frozen=True)

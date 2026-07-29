@@ -1,4 +1,7 @@
-"""CLI surface for the reconciliation pass (ADR-0016)."""
+"""CLI surface for the reconciliation pass (ADR-0016) and the health command (ADR-0017)."""
+
+import logging
+import time
 
 import pytest
 
@@ -99,7 +102,8 @@ def test_a_settled_corpus_prints_nothing(tmp_path, capsys, monkeypatch):
 def test_watch_recomputes_unless_told_not_to(tmp_path, monkeypatch):
     passed = {}
 
-    def fake_watch(sync_fn, interval_s, window_days, ticks, recompute_fn=None):
+    def fake_watch(sync_fn, interval_s, window_days, ticks, recompute_fn=None,
+                   record_fn=None):
         passed["recompute_fn"] = recompute_fn
 
     monkeypatch.setattr("pacelab.watch.watch", fake_watch)
@@ -179,3 +183,93 @@ def test_a_failed_snapshot_fails_the_recompute_command(tmp_path, capsys, monkeyp
     err = capsys.readouterr().err
     assert "no space left on device" in err
     assert "nothing was recomputed" in err
+
+
+# --- health and logging (ADR-0017) ---------------------------------------------------
+
+
+def test_health_needs_no_account(tmp_path, capsys, monkeypatch):
+    # The point of an unkeyed heartbeat: broken credentials are exactly the failure the
+    # health command has to be able to report, so it must not resolve an account itself.
+    monkeypatch.delenv("INTERVALS_API_KEY")
+    monkeypatch.delenv("INTERVALS_ATHLETE_ID")
+    db = tmp_path / "pacelab.db"
+    ResultStore(db).record_tick(True, summary="3 listed, 1 ok, 2 skip", interval_s=900)
+
+    assert main(["health", "--db", str(db)]) == 0
+    assert "healthy" in capsys.readouterr().out
+
+
+def test_health_exits_non_zero_on_a_stale_loop(tmp_path, capsys):
+    # The exit code is the whole interface for the compose HEALTHCHECK.
+    db = tmp_path / "pacelab.db"
+    store = ResultStore(db)
+    store.record_tick(True, summary="0 listed", interval_s=900, now=time.time() - 90_000)
+    store.record_tick(False, error="RateLimited: 429", interval_s=900)
+
+    assert main(["health", "--db", str(db)]) == 1
+
+    out = capsys.readouterr().out
+    assert "UNHEALTHY" in out
+    assert "RateLimited: 429" in out
+
+
+def test_health_on_a_loop_that_never_ran(tmp_path, capsys):
+    assert main(["health", "--db", str(tmp_path / "pacelab.db")]) == 1
+    assert "never" in capsys.readouterr().out
+
+
+def test_watch_hands_tick_a_heartbeat_writer_bound_to_the_interval(tmp_path, monkeypatch):
+    # The interval is recorded rather than assumed, so the staleness threshold tracks
+    # whatever cadence this container was started with.
+    passed = {}
+
+    def fake_watch(sync_fn, interval_s, window_days, ticks, recompute_fn=None,
+                   record_fn=None):
+        passed["record_fn"] = record_fn
+
+    monkeypatch.setattr("pacelab.watch.watch", fake_watch)
+    db = tmp_path / "pacelab.db"
+
+    assert main(["watch", "--ticks", "1", "--interval", "60", "--db", str(db),
+                 "--cache-dir", str(tmp_path)]) == 0
+
+    passed["record_fn"](True, summary="0 listed")
+    assert ResultStore(db).read_health().interval_s == 60
+
+
+def test_the_log_level_comes_from_the_environment(tmp_path, monkeypatch):
+    # How the container is turned up: PACELAB_LOG_LEVEL in .env, no image rebuild.
+    monkeypatch.setenv("PACELAB_LOG_LEVEL", "DEBUG")
+    monkeypatch.setattr("pacelab.watch.watch", lambda *a, **kw: None)
+
+    assert main(["watch", "--ticks", "1", "--db", str(tmp_path / "pacelab.db"),
+                 "--cache-dir", str(tmp_path)]) == 0
+    assert logging.getLogger().level == logging.DEBUG
+
+
+def test_watch_collapses_a_synced_activity_to_one_log_line(tmp_path, capsys, caplog,
+                                                           monkeypatch):
+    # `_emit`'s eight-line block per activity is unreadable in `docker logs` at 96 ticks a
+    # day; report commands keep it, the daemon does not.
+    db = tmp_path / "pacelab.db"
+    store = ResultStore(db)
+    store.save("i1", _result(1.0), Config().model_version, account_id=ACCOUNT)
+    monkeypatch.setattr("pacelab.cli.sync", lambda *a, **kw: [("i1", "ok"), ("i2", "skip")])
+
+    def fake_watch(sync_fn, interval_s, window_days, ticks, recompute_fn=None,
+                   record_fn=None):
+        sync_fn("2026-06-23", "2026-07-07")
+
+    monkeypatch.setattr("pacelab.watch.watch", fake_watch)
+    with caplog.at_level(logging.INFO, logger="pacelab.cli"):
+        assert main(["watch", "--ticks", "1", "--db", str(db),
+                     "--cache-dir", str(tmp_path)]) == 0
+
+    logged = [r.getMessage() for r in caplog.records]
+    assert any("i1" in m and "NP" in m for m in logged)
+    assert any("skip" in m and "i2" in m for m in logged)
+    assert not any("Environmental cost" in m for m in logged)
+    # The log handler writes to stdout too, so the check that matters is that nothing
+    # bypassed it: no `_emit` block reached the terminal untimestamped.
+    assert "Environmental cost" not in capsys.readouterr().out
