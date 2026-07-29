@@ -33,7 +33,8 @@ keeps `uv` out of the image, but adds a second generated file that can go stale 
 ## Base images are digest-pinned
 
 All three image references — both `python:3.13-slim` stages and `ghcr.io/astral-sh/uv` — are
-pinned by sha256 digest, each with its human-readable tag in a trailing comment. A
+pinned by sha256 digest, each with its human-readable tag in the comment line directly above
+it — Dockerfiles have no trailing comments, `#` only starts one at the beginning of a line. A
 manifest-list digest is still multi-arch, so arm64 resolution on the Pi is unaffected. Same
 commit, byte-identical image, forever.
 

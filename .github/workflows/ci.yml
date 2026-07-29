@@ -4,22 +4,36 @@
 # The Pi always runs `:latest`, unattended (map decision 5), so a red test suite must never
 # produce a pullable tag. That gate is the `needs: test` below and nothing else — keep it.
 #
-# The GHCR package is public, so the Pi pulls with no credentials at all. Publishing uses
-# the built-in GITHUB_TOKEN; there is no PAT to provision or rotate. Package visibility is
-# a one-time setting on the package itself, not something a workflow can assert.
+# Publishing uses the built-in GITHUB_TOKEN; there is no PAT to provision or rotate. The
+# package must be **public** so the Pi pulls with no credentials at all — that is a one-time
+# setting on the package after its first publish, not something a workflow can assert. The
+# `org.opencontainers.image.source` label below is what links the package to this repo in
+# the first place; without it the package lands orphaned and the setting is hard to reach.
 name: CI
 
 on:
   push:
   pull_request:
 
-# A branch that is pushed twice in quick succession only needs its newest commit tested.
+# Read-only by default; only the publishing job widens this.
+permissions:
+  contents: read
+
 concurrency:
+  # A branch pushed twice in quick succession only needs its newest commit tested — but a
+  # publish to main is never cancelled, or `:latest` could be left behind the newest green
+  # commit, which is the tag the Pi follows unattended.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
+    # Same-repo branches already get a push-triggered run, whose checks show up on the PR.
+    # Without this, every PR commit runs the whole workflow twice — including the arm64
+    # image build. Fork PRs have no push run of their own, so they still run here.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,3 +78,6 @@ jobs:
           tags: |
             ghcr.io/hermanno3005/pacelab:latest
             ghcr.io/hermanno3005/pacelab:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}

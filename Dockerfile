@@ -10,7 +10,8 @@
 FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS build
 
 # The uv binary only — the build stage stays the same image as the runtime stage, so the
-# venv is built against the interpreter that will run it. uv 0.11.33
+# venv is built against the interpreter that will run it.
+# uv 0.11.33
 COPY --from=ghcr.io/astral-sh/uv@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 /uv /bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
