@@ -33,7 +33,8 @@ keeps `uv` out of the image, but adds a second generated file that can go stale 
 ## Base images are digest-pinned
 
 All three image references — both `python:3.13-slim` stages and `ghcr.io/astral-sh/uv` — are
-pinned by sha256 digest, each with its human-readable tag in a trailing comment. A
+pinned by sha256 digest, each with its human-readable tag in the comment line directly above
+it — Dockerfiles have no trailing comments, `#` only starts one at the beginning of a line. A
 manifest-list digest is still multi-arch, so arm64 resolution on the Pi is unaffected. Same
 commit, byte-identical image, forever.
 
@@ -41,8 +42,8 @@ The cost is recorded honestly: this repo has no Renovate or Dependabot, so Debia
 patch updates land only when someone bumps the digest by hand. Accepted because the
 alternative — floating tags — lets a bad point release reach an always-on loop with nobody
 watching, and the deployment's exposure is outbound HTTPS to intervals.icu and ERA5 only.
-**Who bumps the digests, and on what trigger, is not settled here** — it belongs with the CI
-design.
+**Who bumps the digests, and on what trigger,** belonged with the CI design rather than this
+decision; it is settled below.
 
 ## The container runs as uid 1000, not root
 
@@ -76,6 +77,17 @@ Instead the contract guarantees the image is **probe-ready**: Python with stdlib
 The health surface — what the heartbeat is and what reads it — is designed separately, and the
 probe belongs in `compose.yaml`, where its interval and predicate are tunable without
 republishing the image.
+
+## Who bumps the digests (settled by the CI design, #15)
+
+By hand, in the Dockerfile, as an ordinary commit — no Renovate, no Dependabot, no scheduled
+job that opens PRs against a single-user repo nobody is watching. The trigger is either
+touching the image for another reason, or a Debian/Python advisory that actually reaches this
+deployment's surface (outbound HTTPS to intervals.icu and ERA5).
+
+The bump is safe to make blind because it goes through the same gate as everything else: CI
+builds the image on every branch and PR, and only main publishes a tag. A digest that breaks
+the build fails the PR rather than the Pi.
 
 ## Layer caching
 

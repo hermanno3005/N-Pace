@@ -8,3 +8,5 @@ __pycache__
 *.db
 tests
 docs
+.github
+compose.yaml

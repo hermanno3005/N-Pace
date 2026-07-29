@@ -9,8 +9,18 @@ services:
     build: .
     env_file: .env
     volumes:
-      - pacelab-data:/data
+      # A bind mount, not a named volume (ADR-0015): the corpus stays an ordinary file
+      # that sqlite3 and scp can reach from the host.
+      #
+      # Deliberately relative, and deliberately a *subdirectory*. The Pi's convention is
+      # ~/docker/<service>/ per service (#11), so this file lives at
+      # /home/hermi/docker/pacelab/compose.yaml and the corpus lands in
+      # /home/hermi/docker/pacelab/data/. Mounting the service directory itself would put
+      # .env inside the container's own writable state directory — so the corpus goes one
+      # level down, and #16 makes this same path absolute when it pins the Pi's layout.
+      - ./data:/data
+    # The image runs as uid 1000, which is the Pi's first login account. Uncomment and set
+    # PUID/PGID in .env if this host's account differs — otherwise the container fails
+    # loudly on its first write rather than corrupting anything.
+    # user: "${PUID}:${PGID}"
     restart: unless-stopped
-
-volumes:
-  pacelab-data:
