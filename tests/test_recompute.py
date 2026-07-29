@@ -7,6 +7,7 @@ import pytest
 from pacelab.analyze import ActivityResult, SegmentResult
 from pacelab.config import Config
 from pacelab.recompute import recompute
+from pacelab.snapshot import SnapshotError
 from pacelab.store import ResultStore
 from pacelab.weather.conditions import Conditions
 from pacelab.weather.service import WeatherUnavailable
@@ -214,3 +215,98 @@ def test_a_current_row_that_was_never_annotated_is_published_not_re_analysed(tmp
     assert provider.downloaded == []
     assert not store.needs_publish("i100", config.model_version, account_id=ACCOUNT)
     assert store.load("i100", account_id=ACCOUNT).distance_m == 100.0  # stub, untouched
+
+
+def test_a_version_bump_snapshots_before_the_first_row_is_rewritten(tmp_path):
+    # ADR-0018: the snapshot guards the moment of maximal damage — every row rewritten
+    # and every public description republished, unattended. It must land before the
+    # first write, not alongside it.
+    provider, store = _fixture(tmp_path)
+    _stranded_provisional(store)
+    config = Config()
+    events = []
+    provider.downloaded = _Recording(events, "download")
+
+    recompute(provider, ArchiveService(), store, config, ACCOUNT,
+              before_rewrite=lambda: events.append("snapshot"))
+
+    assert events[0] == "snapshot"
+    assert events.count("snapshot") == 1  # once per pass, not once per activity
+
+
+def test_a_settled_corpus_takes_no_snapshot(tmp_path):
+    # Rejected in ADR-0018: snapshotting every tick, which writes to the aged SD card
+    # 96 times a day to capture nothing.
+    provider, store = _fixture(tmp_path)
+    config = Config()
+    store.save("i100", _stub_result(), config.model_version, account_id=ACCOUNT)
+    store.mark_published("i100", config.model_version, account_id=ACCOUNT)
+    taken = []
+
+    recompute(provider, ArchiveService(), store, config, ACCOUNT,
+              before_rewrite=lambda: taken.append("snapshot"))
+
+    assert taken == []
+
+
+def test_a_publish_only_retry_takes_no_snapshot(tmp_path):
+    # This row is enumerated every pass until intervals.icu accepts the write, and
+    # nothing about it is rewritten. Snapshotting here would fire on a loop.
+    provider, store = _fixture(tmp_path, publish_fails=True)
+    config = Config()
+    store.save("i100", _stub_result(), config.model_version, account_id=ACCOUNT)
+    taken = []
+
+    with pytest.warns(UserWarning, match="publish failed"):
+        outcomes = recompute(provider, ArchiveService(), store, config, ACCOUNT,
+                             before_rewrite=lambda: taken.append("snapshot"))
+
+    assert outcomes == [("i100", "publish-failed")]
+    assert taken == []
+    assert provider.downloaded == []
+
+
+def test_a_forced_pass_snapshots_because_it_rewrites_everything(tmp_path):
+    provider, store = _fixture(tmp_path)
+    config = Config()
+    store.save("i100", _stub_result(), config.model_version, account_id=ACCOUNT)
+    store.mark_published("i100", config.model_version, account_id=ACCOUNT)
+    taken = []
+
+    recompute(provider, ArchiveService(), store, config, ACCOUNT, force=True,
+              before_rewrite=lambda: taken.append("snapshot"))
+
+    assert taken == ["snapshot"]
+
+
+def test_a_failed_snapshot_aborts_the_pass_with_the_corpus_untouched(tmp_path):
+    # ADR-0018: the recompute must not run unprotected. Nothing is lost by stopping —
+    # the pass is derived from the store, so a skipped pass looks like one not started.
+    provider, store = _fixture(tmp_path)
+    _stranded_provisional(store)
+    config = Config()
+
+    def failing_snapshot():
+        raise SnapshotError("no space left on device")
+
+    with pytest.raises(SnapshotError):
+        recompute(provider, ArchiveService(), store, config, ACCOUNT,
+                  before_rewrite=failing_snapshot)
+
+    assert provider.downloaded == []
+    assert provider.descriptions == {}
+    assert store.is_current("i100", OLD_VERSION, account_id=ACCOUNT)
+    assert store.is_provisional("i100", account_id=ACCOUNT)
+    assert store.needs_recompute(config.model_version, ACCOUNT) == ["i100"]  # next tick
+
+
+class _Recording(list):
+    """A list that also notes each append on a shared event log, to order two calls."""
+
+    def __init__(self, events, label):
+        super().__init__()
+        self._events, self._label = events, label
+
+    def append(self, item):
+        self._events.append(self._label)
+        super().append(item)

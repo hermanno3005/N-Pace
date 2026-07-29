@@ -97,6 +97,15 @@ by a query over the store, not by a provider listing: nothing new is discovered,
 what separates it from a **sync**. This is how a coefficient re-tune reaches history.
 _Avoid_: backfill, reprocess, migration, resync.
 
+**Snapshot**:
+One verified `.tar.gz` of the two irreplaceable parts of the corpus — the curated
+`pacelab.db` and the pinned weather cache (ADR-0018). Written before a **recompute**
+rewrites rows at a new `model_version`, and by hand after curating. Verified at write
+time (integrity check + row counts), or it is a failure, not a warning. The two files it
+carries are the **backup set**; the FIT cache is not in it, because intervals.icu holds the
+authoritative copy.
+_Avoid_: dump, export, archive (that's the `.tar.gz` file, not the act).
+
 **Provisional Analysis**:
 An analysis computed from forecast-tier weather because the run is more recent than the
 reanalysis archive's publication lag. A preview, marked with a tilde in its annotation,

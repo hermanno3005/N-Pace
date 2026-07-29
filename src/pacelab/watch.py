@@ -10,6 +10,8 @@ import time
 import warnings
 from datetime import date, timedelta
 
+from pacelab.snapshot import SnapshotError
+
 DEFAULT_INTERVAL_S = 900  # 15 min: ~annotation-within-minutes at 96 listing calls/day
 DEFAULT_WINDOW_DAYS = 14  # comfortably covers ERA5's ~week lag, so provisionals finalize
 
@@ -21,12 +23,24 @@ def tick(sync_fn, window_days: int, today: date | None = None, recompute_fn=None
     first and against the archive tier only (ADR-0016), so a provisional still inside
     ERA5's lag falls through to sync's forecast tier in this same tick. It is optional:
     ``pacelab watch --no-recompute`` disables a misbehaving pass without stopping the loop.
+
+    A recompute failure is contained and the sync still runs. A failed corpus snapshot is
+    the one exception: ``SnapshotError`` **propagates out of the tick** (ADR-0018), so the
+    sync half never runs and the caller can tell a failed tick from a quiet one. That is
+    the distinction ADR-0017's health handler counts; ``watch`` below stands in for it
+    until that lands.
     """
     today = today or date.today()
     oldest = (today - timedelta(days=window_days)).isoformat()
     if recompute_fn is not None:
         try:
             recompute_fn()
+        except SnapshotError:
+            # Deliberately not caught here. The snapshot exists to protect a whole-corpus
+            # rewrite; recomputing without it removes the protection at the single moment
+            # it was built for, and a Pi that cannot write 1.8 MB is broken in a way that
+            # should be loud rather than contained.
+            raise
         except Exception as e:  # noqa: BLE001 — the pass must not take the sync down
             warnings.warn(f"recompute failed ({e}) — syncing anyway", stacklevel=2)
     try:
@@ -38,10 +52,20 @@ def tick(sync_fn, window_days: int, today: date | None = None, recompute_fn=None
 
 def watch(sync_fn, interval_s: int = DEFAULT_INTERVAL_S, window_days: int = DEFAULT_WINDOW_DAYS,
           ticks: int | None = None, sleep=time.sleep, recompute_fn=None) -> None:
-    """Tick forever (or ``ticks`` times — ``1`` makes it cron-compatible)."""
+    """Tick forever (or ``ticks`` times — ``1`` makes it cron-compatible).
+
+    A raised tick (today: only a failed snapshot) is logged and slept off rather than
+    ending the process — a Pi that recovers disk space must start annotating again with
+    nobody there. This is the seam ADR-0017's health handler replaces: it wraps the same
+    call and turns the raise into a climbing ``consecutive_failures``.
+    """
     n = 0
     while True:
-        tick(sync_fn, window_days, recompute_fn=recompute_fn)
+        try:
+            tick(sync_fn, window_days, recompute_fn=recompute_fn)
+        except SnapshotError as e:
+            warnings.warn(f"tick failed: snapshot failed ({e}) — corpus untouched, "
+                          f"retrying next tick", stacklevel=2)
         n += 1
         if ticks is not None and n >= ticks:
             return
