@@ -28,10 +28,8 @@ def _publish_step():
     return next(s for s in JOBS["image"]["steps"] if "build-push-action" in s.get("uses", ""))
 
 
-def _needs(job):
-    # `needs:` is a string when there is one dependency, a list when there are several.
-    declared = JOBS[job]["needs"]
-    return [declared] if isinstance(declared, str) else list(declared)
+def _login_step():
+    return next(s for s in JOBS["image"]["steps"] if "login-action" in s.get("uses", ""))
 
 
 def test_every_base_image_is_digest_pinned():
@@ -51,8 +49,11 @@ def test_both_stages_share_one_base_digest():
 
 
 def test_the_image_is_built_from_python_and_uv_alone():
-    # Anything else pinned in here is a third base nobody decided on.
+    # ADR-0015 names exactly two upstreams. Anything else in here is a third base nobody
+    # decided on — so match them by name, not just count the distinct digests.
     assert len({ref.split("@")[1] for ref in IMAGE_REFS}) == 2
+    named = [ref.split("@")[0] for ref in IMAGE_REFS]
+    assert sorted(set(named)) == ["ghcr.io/astral-sh/uv", "python:3.13-slim"]
 
 
 def test_dependencies_come_from_the_lockfile_not_a_fresh_resolve():
@@ -96,15 +97,21 @@ def test_data_is_a_bind_mount_not_a_named_volume():
 def test_publication_is_downstream_of_green_tests():
     # Issue #15's hard requirement: a red test suite must never produce a pullable tag.
     # Asserted exactly — `needs: smoke-test` would satisfy a substring check while the
-    # real gate was gone.
-    assert _needs("image") == ["test"]
+    # real gate was gone. `needs:` is a string with one dependency, a list with several.
+    assert JOBS["image"]["needs"] in ("test", ["test"])
 
 
 def test_only_main_publishes():
     # Every branch builds the image; only main pushes tags for it.
-    push = _publish_step()["with"]["push"]
-    assert "refs/heads/main" in push
-    assert push != "true"
+    publish = JOBS["image"]["env"]["PUBLISH"]
+    assert "refs/heads/main" in publish and "push" in publish
+
+
+def test_logging_in_and_pushing_share_one_gate():
+    # Two copies of the predicate could drift apart, and both halves of that drift are
+    # silent: a login with nothing to push, or a push with no credentials.
+    assert _login_step()["if"] == "env.PUBLISH == 'true'"
+    assert _publish_step()["with"]["push"] == "${{ env.PUBLISH }}"
 
 
 def test_the_image_job_builds_natively_on_arm64():

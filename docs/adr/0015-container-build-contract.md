@@ -42,8 +42,8 @@ The cost is recorded honestly: this repo has no Renovate or Dependabot, so Debia
 patch updates land only when someone bumps the digest by hand. Accepted because the
 alternative — floating tags — lets a bad point release reach an always-on loop with nobody
 watching, and the deployment's exposure is outbound HTTPS to intervals.icu and ERA5 only.
-**Who bumps the digests, and on what trigger, is not settled here** — it belongs with the CI
-design.
+**Who bumps the digests, and on what trigger,** belonged with the CI design rather than this
+decision; it is settled below.
 
 ## The container runs as uid 1000, not root
 

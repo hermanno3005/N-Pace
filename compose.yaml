@@ -16,8 +16,8 @@ services:
       # ~/docker/<service>/ per service (#11), so this file lives at
       # /home/hermi/docker/pacelab/compose.yaml and the corpus lands in
       # /home/hermi/docker/pacelab/data/. Mounting the service directory itself would put
-      # .env inside the container's own writable state directory. #16 may pin the host
-      # path absolute during bring-up; either form satisfies the contract test.
+      # .env inside the container's own writable state directory — so the corpus goes one
+      # level down, and #16 makes this same path absolute when it pins the Pi's layout.
       - ./data:/data
     # The image runs as uid 1000, which is the Pi's first login account. Uncomment and set
     # PUID/PGID in .env if this host's account differs — otherwise the container fails
