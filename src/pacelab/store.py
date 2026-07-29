@@ -244,6 +244,11 @@ class ResultStore:
         `ok` means the tick raised nothing (ADR-0017) — a pass that completed while every
         publish failed is a success that reports its degradation through `summary`. The
         returned count is what `watch` uses to log a traceback once per streak.
+
+        `last_success_at`, the error and the recompute stamp survive a tick that has
+        nothing to say about them; `last_tick_summary` does not. It describes *this* tick,
+        and a failed tick synced nothing — carrying the previous one forward would leave a
+        broken loop displaying the last work it managed as if it had just done it.
         """
         at = time.time() if now is None else now
         with self._connect() as conn:
@@ -266,7 +271,7 @@ class ResultStore:
             )
         return failures
 
-    def read_health(self) -> "Heartbeat | None":
+    def read_heartbeat(self) -> "Heartbeat | None":
         """The watch loop's last tick, or None when it has never run."""
         with self._connect() as conn:
             row = conn.execute(

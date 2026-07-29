@@ -15,14 +15,18 @@ from pacelab.watch import DEFAULT_INTERVAL_S
 STALE_MULTIPLE = 3  # ~45 min at the default 15-minute interval
 
 
-def threshold_s(beat: Heartbeat | None, default_interval_s: int = DEFAULT_INTERVAL_S) -> int:
-    """How old the last success may get before the loop is unhealthy."""
-    interval = (beat.interval_s if beat and beat.interval_s else default_interval_s)
+def threshold_s(beat: Heartbeat | None) -> int:
+    """How old the last success may get before the loop is unhealthy.
+
+    Derived from the interval the loop recorded, so the threshold tracks whatever
+    `--interval` it was started with. A row written before that column existed falls back
+    to the default rather than to "never stale".
+    """
+    interval = (beat.interval_s if beat and beat.interval_s else DEFAULT_INTERVAL_S)
     return STALE_MULTIPLE * interval
 
 
-def is_healthy(beat: Heartbeat | None, now: float,
-               default_interval_s: int = DEFAULT_INTERVAL_S) -> bool:
+def is_healthy(beat: Heartbeat | None, now: float) -> bool:
     """True when the loop produced a successful tick recently enough.
 
     A missing row and a NULL `last_success_at` both read as infinitely stale: a loop that
@@ -30,19 +34,18 @@ def is_healthy(beat: Heartbeat | None, now: float,
     """
     if beat is None or beat.last_success_at is None:
         return False
-    return now - beat.last_success_at <= threshold_s(beat, default_interval_s)
+    return now - beat.last_success_at <= threshold_s(beat)
 
 
-def format_health(beat: Heartbeat | None, now: float,
-                  default_interval_s: int = DEFAULT_INTERVAL_S) -> str:
+def format_health(beat: Heartbeat | None, now: float) -> str:
     """The human summary `pacelab health` prints. First line is the verdict."""
-    threshold = threshold_s(beat, default_interval_s)
+    threshold = threshold_s(beat)
     if beat is None:
         return (f"UNHEALTHY  no heartbeat recorded — `pacelab watch` has never ticked "
                 f"against this database")
     if beat.last_success_at is None:
         lines = [f"UNHEALTHY  no successful tick, ever (threshold {_duration(threshold)})"]
-    elif is_healthy(beat, now, default_interval_s):
+    elif is_healthy(beat, now):
         lines = [f"healthy    last success {_ago(beat.last_success_at, now)} "
                  f"(threshold {_duration(threshold)})"]
     else:
@@ -56,7 +59,7 @@ def format_health(beat: Heartbeat | None, now: float,
     lines.append(f"  failures       {beat.consecutive_failures} consecutive")
     if beat.last_error:
         lines.append(f"  last error     {beat.last_error}  ({_stamp(beat.last_error_at)})")
-    lines.append(f"  interval       {beat.interval_s or default_interval_s}s")
+    lines.append(f"  interval       {beat.interval_s or DEFAULT_INTERVAL_S}s")
     return "\n".join(lines)
 
 

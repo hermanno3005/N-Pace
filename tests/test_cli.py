@@ -235,7 +235,7 @@ def test_watch_hands_tick_a_heartbeat_writer_bound_to_the_interval(tmp_path, mon
                  "--cache-dir", str(tmp_path)]) == 0
 
     passed["record_fn"](True, summary="0 listed")
-    assert ResultStore(db).read_health().interval_s == 60
+    assert ResultStore(db).read_heartbeat().interval_s == 60
 
 
 def test_the_log_level_comes_from_the_environment(tmp_path, monkeypatch):
@@ -273,3 +273,12 @@ def test_watch_collapses_a_synced_activity_to_one_log_line(tmp_path, capsys, cap
     # The log handler writes to stdout too, so the check that matters is that nothing
     # bypassed it: no `_emit` block reached the terminal untimestamped.
     assert "Environmental cost" not in capsys.readouterr().out
+
+
+def test_health_does_not_create_the_database_it_probes(tmp_path, capsys):
+    # The probe runs every five minutes forever. Opening a ResultStore would create an
+    # empty db under /data — state manufactured by the thing that only claims to read it.
+    db = tmp_path / "pacelab.db"
+
+    assert main(["health", "--db", str(db)]) == 1
+    assert not db.exists()

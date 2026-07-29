@@ -118,7 +118,6 @@ class _SyncContext:
 
     def __init__(self, args, logged: bool = False):
         self.args = args
-        self.say = log.info if logged else _print
         self.logged = logged
         self.config = Config(apply_wind=args.apply_wind)
         account = Account.from_env()
@@ -130,6 +129,18 @@ class _SyncContext:
         # Forecast tier for runs inside ERA5's lag — never disk-cached (ADR-0012).
         self.provisional = WeatherService(ForecastFetcher(), cache_dir=args.cache_dir / "weather",
                                           disk_cache=False)
+
+    def say(self, message: str) -> None:
+        """One line out, on whichever channel this run owns."""
+        if self.logged:
+            log.info(message)
+        else:
+            print(message, flush=True)
+
+    def end_block(self) -> None:
+        """A blank line separates printed report blocks; a log has timestamps instead."""
+        if not self.logged:
+            print()
 
     def run(self, oldest: str, newest: str):
         outcomes = sync(self.provider, self.service, self.store, self.config, oldest, newest,
@@ -150,6 +161,7 @@ class _SyncContext:
                 print(f"{status:8} {activity_id}")
         done = sum(1 for _, s in outcomes if s in analysed)
         self.say(f"synced {done} / {len(outcomes)} listed")
+        self.end_block()
         return outcomes
 
     def snapshot(self):
@@ -166,6 +178,7 @@ class _SyncContext:
             self.say(f"{status:14} {activity_id}")
         done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
         self.say(f"recomputed {done} / {len(outcomes)} drifted")
+        self.end_block()
         return outcomes
 
 
@@ -223,9 +236,13 @@ def _run_health(args) -> int:
     Deliberately resolves no account: the heartbeat is unkeyed, so this reports broken
     credentials instead of failing on them (ADR-0017).
     """
-    beat = ResultStore(args.db).read_health()
-    print(format_health(beat, now=time.time()))
-    return 0 if is_healthy(beat, now=time.time()) else 1
+    # Deliberately no ResultStore() on a database that is not there: opening one creates
+    # it, and a probe that fires every five minutes must not manufacture the state it
+    # claims to read — an empty db under /data would outlive the mistake that made it.
+    beat = ResultStore(args.db).read_heartbeat() if args.db.exists() else None
+    now = time.time()
+    print(format_health(beat, now=now))
+    return 0 if is_healthy(beat, now=now) else 1
 
 
 def _run_publish(args) -> int:

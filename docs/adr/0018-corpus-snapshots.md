@@ -133,11 +133,10 @@ next tick retries.
 Nothing is lost by stopping — ADR-0016's pass is derived from the store, so a skipped pass is
 indistinguishable from one that hasn't started yet. Progress halts; state does not corrupt.
 
-**ADR-0017 has not landed yet**, so there is no handler to catch the raise. Until it does,
-`watch()` itself logs it and sleeps to the next tick: the process must not die, or a Pi that
-recovers disk space never starts annotating again. The exception still propagates out of
-`tick()` — which is the seam ADR-0017's handler wraps — so a failed tick stays distinguishable
-from a quiet one, and adopting the health surface is a change to the caller, not to this.
+ADR-0017 has since landed, and it changed nothing here, which was the point of leaving the
+seam where it is: `tick()` records the failure and re-raises, `watch()` sleeps to the next
+tick rather than dying, and a Pi that recovers disk space starts annotating again on its own.
+The raise is still what keeps a failed tick distinguishable from a quiet one.
 
 Rejected: logging the failure and recomputing anyway. That removes the protection at the single
 moment it was built for.

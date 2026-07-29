@@ -70,8 +70,8 @@ left untouched at the old version, and the next tick retries (ADR-0018). Nothing
 stopping; progress halts, state does not corrupt.
 
 It is a failed tick in the heartbeat's sense too (ADR-0017), so it surfaces without anyone
-reading logs — `docker compose exec pacelab pacelab health` names the error, and the
-container goes unhealthy in `docker ps` once no tick has succeeded for 45 minutes:
+reading logs: the container goes unhealthy in `docker ps` once no tick has succeeded for
+45 minutes, and this names the error that did it —
 
     docker compose exec pacelab pacelab health
 

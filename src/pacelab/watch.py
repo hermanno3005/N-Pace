@@ -82,10 +82,21 @@ def tick(sync_fn, window_days: int, today: date | None = None, recompute_fn=None
 
 def _record(record_fn, ok: bool, summary: str | None = None, error: str | None = None,
             recomputed: bool = False) -> int | None:
-    """Write the heartbeat if there is one to write, and return the failure streak."""
+    """Write the heartbeat if there is one to write, and return the failure streak.
+
+    Contained like everything else in a tick, and for a sharper reason than most: the
+    observability of a failure must never be what ends the loop. The failure that takes
+    the disk down (ADR-0018's full SD card) is exactly the one that also fails this write,
+    and a daemon that dies while reporting that it is unwell is worse than a silent one.
+    """
     if record_fn is None:
         return None
-    return record_fn(ok, summary=summary, error=error, recomputed=recomputed)
+    try:
+        return record_fn(ok, summary=summary, error=error, recomputed=recomputed)
+    except Exception as e:  # noqa: BLE001 — recording is not worth the process
+        log.warning("could not record the heartbeat (%s) — `pacelab health` will read "
+                    "stale until the next tick that can write", e)
+        return None
 
 
 def _log_failure(exc: BaseException, failures: int | None) -> None:

@@ -281,3 +281,17 @@ def test_the_loop_logs_a_failed_snapshot_rather_than_warning(caplog):
     failures = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert len(failures) == 2  # both ticks, not just the first
     assert all("no space left on device" in r.getMessage() for r in failures)
+
+
+def test_a_heartbeat_that_cannot_be_written_does_not_end_the_loop(caplog):
+    # The sharpest case of "contained": the failure that fills the disk is the same one
+    # that fails this write, and a daemon that dies while reporting that it is unwell is
+    # worse than one that stays quiet.
+    def broken_writer(ok, summary=None, error=None, recomputed=False):
+        raise RuntimeError("database or disk is full")
+
+    with caplog.at_level(logging.INFO, logger="pacelab.watch"):
+        watch(lambda o, n: [], interval_s=900, window_days=14, ticks=2,
+              sleep=lambda s: None, record_fn=broken_writer)
+
+    assert any("could not record the heartbeat" in r.getMessage() for r in caplog.records)
