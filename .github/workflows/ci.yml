@@ -5,10 +5,12 @@
 # produce a pullable tag. That gate is the `needs: test` below and nothing else — keep it.
 #
 # Publishing uses the built-in GITHUB_TOKEN; there is no PAT to provision or rotate. The
-# package must be **public** so the Pi pulls with no credentials at all — that is a one-time
-# setting on the package after its first publish, not something a workflow can assert. The
-# `org.opencontainers.image.source` label below is what links the package to this repo in
-# the first place; without it the package lands orphaned and the setting is hard to reach.
+# package needs to be **public** so the Pi pulls with no credentials at all, and it already
+# is: a package published by a workflow inherits the visibility of the repository it was
+# published from, and this repo is public. The `org.opencontainers.image.source` label below
+# is what links the two, so keeping it is what keeps that inheritance. If the link is ever
+# lost the package lands orphaned and private, and visibility becomes a manual setting at
+# github.com/users/<owner>/packages/container/pacelab/settings — the fallback, not the plan.
 name: CI
 
 on:
