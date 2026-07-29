@@ -77,6 +77,17 @@ The health surface — what the heartbeat is and what reads it — is designed s
 probe belongs in `compose.yaml`, where its interval and predicate are tunable without
 republishing the image.
 
+## Who bumps the digests (settled by the CI design, #15)
+
+By hand, in the Dockerfile, as an ordinary commit — no Renovate, no Dependabot, no scheduled
+job that opens PRs against a single-user repo nobody is watching. The trigger is either
+touching the image for another reason, or a Debian/Python advisory that actually reaches this
+deployment's surface (outbound HTTPS to intervals.icu and ERA5).
+
+The bump is safe to make blind because it goes through the same gate as everything else: CI
+builds the image on every branch and PR, and only main publishes a tag. A digest that breaks
+the build fails the PR rather than the Pi.
+
 ## Layer caching
 
 The two-phase `uv sync` improves on the sketch rather than merely preserving it: editing

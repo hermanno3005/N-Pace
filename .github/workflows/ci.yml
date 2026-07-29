@@ -1,0 +1,66 @@
+# The delivery path for map decision 4: tests on every push, and a published image only
+# when they pass.
+#
+# The Pi always runs `:latest`, unattended (map decision 5), so a red test suite must never
+# produce a pullable tag. That gate is the `needs: test` below and nothing else — keep it.
+#
+# The GHCR package is public, so the Pi pulls with no credentials at all. Publishing uses
+# the built-in GITHUB_TOKEN; there is no PAT to provision or rotate. Package visibility is
+# a one-time setting on the package itself, not something a workflow can assert.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A branch that is pushed twice in quick succession only needs its newest commit tested.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      # --frozen for the same reason the image build uses it: a lockfile that has drifted
+      # from pyproject.toml is a failure, not something to silently re-resolve around.
+      - run: uv sync --frozen
+
+      - run: uv run pytest
+
+  image:
+    # The gate. Publication is strictly downstream of green tests.
+    needs: test
+    # Native arm64 for the Pi (C-4) — free for public repos, so no QEMU emulation.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Every branch *builds* the image — a Dockerfile that no longer builds should fail
+      # its PR, not main. Only main pushes tags: `:latest` is what the Pi follows, and
+      # `:<sha>` is how "what is running?" and "roll back to that one" get real answers.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/hermanno3005/pacelab:latest
+            ghcr.io/hermanno3005/pacelab:${{ github.sha }}

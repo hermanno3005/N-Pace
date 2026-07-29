@@ -9,8 +9,11 @@ services:
     build: .
     env_file: .env
     volumes:
-      - pacelab-data:/data
+      # A bind mount, not a named volume (ADR-0015): the corpus stays an ordinary file
+      # that sqlite3 and scp can reach from the host.
+      - ./data:/data
+    # The image runs as uid 1000, which is the Pi's first login account. Uncomment and set
+    # PUID/PGID in .env if this host's account differs — otherwise the container fails
+    # loudly on its first write rather than corrupting anything.
+    # user: "${PUID}:${PGID}"
     restart: unless-stopped
-
-volumes:
-  pacelab-data:
