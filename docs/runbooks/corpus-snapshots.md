@@ -69,6 +69,13 @@ The watch loop treats it as a failed tick: the recompute does **not** run, the c
 left untouched at the old version, and the next tick retries (ADR-0018). Nothing is lost by
 stopping; progress halts, state does not corrupt.
 
+It is a failed tick in the heartbeat's sense too (ADR-0017), so it surfaces without anyone
+reading logs: the container goes unhealthy in `docker ps` once no tick has succeeded for
+3× the configured `--interval` (45 minutes at the default 900s), and this names the error
+that did it —
+
+    docker compose exec pacelab pacelab health
+
 The two failures worth expecting:
 
 - **`no space left on device`** — check `df -h /`. Snapshots are bounded at 10, so the

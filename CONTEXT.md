@@ -89,6 +89,15 @@ annotated within minutes and provisional analyses finalize as the archive catche
 Runs as a container on the home server.
 _Avoid_: daemon, cron job, webhook (we poll; see ADR-0013).
 
+**Heartbeat**:
+The single overwritten row **watch** leaves behind each tick (ADR-0017): last tick, last
+success, the consecutive-failure count, the last error, and the interval it is running at.
+Current state, not history — the log is the history. Unkeyed by **Account**, because it
+describes the process rather than an athlete, which is what lets `pacelab health` report
+broken credentials without needing valid ones. **Unhealthy** is one clause read off it: no
+successful tick within 3 × the recorded interval.
+_Avoid_: status, ping, liveness (it is a last-success probe, not a liveness one).
+
 **Recompute**:
 The reconciliation pass over the stored corpus (ADR-0016): every row that disagrees with
 itself — stale `model_version`, still provisional, or never annotated — is re-analysed

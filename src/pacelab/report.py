@@ -42,6 +42,18 @@ def format_summary(activity_id: str, result: ActivityResult) -> str:
     return "\n".join(lines)
 
 
+def format_line(result: ActivityResult) -> str:
+    """One activity on one line — what the watch loop logs instead of the block above.
+
+    `docker logs` at 96 ticks a day is only readable if a tick is a handful of lines
+    (ADR-0017), so this keeps the two paces and what was removed to get from one to the
+    other, and drops everything a human would go to `pacelab analyze` for.
+    """
+    return (f"{result.distance_m / 1000:.2f} km  obs {pace(result.observed_pace)} → "
+            f"NP {pace(result.np_pace)}/km  (grade {result.cost_grade:+.1f}, "
+            f"heat {result.cost_heat:+.1f})")
+
+
 def format_segments(result: ActivityResult) -> str:
     header = f"{'#':>3} {'dist':>5} {'grade':>6} {'obs':>6} {'NP':>6} {'temp':>5} {'wind':>5} {'stop':>4}"
     rows = [header]

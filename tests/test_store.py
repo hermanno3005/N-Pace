@@ -252,3 +252,116 @@ def test_an_unversioned_row_counts_as_stale(tmp_path):
         conn.execute("UPDATE activities SET model_version = NULL")
 
     assert store.has_stale_version("0.2.1")
+
+
+# --- the heartbeat (ADR-0017) -------------------------------------------------------
+
+
+def test_the_heartbeat_starts_absent(tmp_path):
+    # Nothing has ticked yet, and an empty row would be a lie: `pacelab health` must be
+    # able to tell "never ran" apart from "ran and succeeded".
+    assert ResultStore(tmp_path / "pacelab.db").read_heartbeat() is None
+
+
+def test_a_successful_tick_records_a_heartbeat(tmp_path):
+    store = ResultStore(tmp_path / "pacelab.db")
+
+    store.record_tick(True, summary="5 listed, 1 ok, 4 skip", interval_s=900, now=100.0)
+
+    beat = store.read_heartbeat()
+    assert beat.last_tick_at == 100.0
+    assert beat.last_success_at == 100.0
+    assert beat.consecutive_failures == 0
+    assert beat.last_error is None
+    assert beat.last_tick_summary == "5 listed, 1 ok, 4 skip"
+    assert beat.interval_s == 900
+
+
+def test_a_failed_tick_climbs_the_counter_and_leaves_the_last_success_alone(tmp_path):
+    # The whole point of the row: a loop that keeps ticking and keeps failing must look
+    # different from one that is quietly working.
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.record_tick(True, summary="0 listed", interval_s=900, now=100.0)
+
+    assert store.record_tick(False, error="RateLimited: 429", interval_s=900, now=200.0) == 1
+    assert store.record_tick(False, error="RateLimited: 429", interval_s=900, now=300.0) == 2
+
+    beat = store.read_heartbeat()
+    assert beat.last_tick_at == 300.0
+    assert beat.last_success_at == 100.0  # untouched by the failures
+    assert beat.consecutive_failures == 2
+    assert beat.last_error == "RateLimited: 429"
+    assert beat.last_error_at == 300.0
+
+
+def test_a_clean_tick_resets_the_counter_but_keeps_the_last_error(tmp_path):
+    # The error stays readable after recovery — "it broke at 03:00 and came back" is the
+    # thing a human wants from a heartbeat they only look at after the fact.
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.record_tick(False, error="boom", interval_s=900, now=100.0)
+
+    assert store.record_tick(True, summary="0 listed", interval_s=900, now=200.0) == 0
+
+    beat = store.read_heartbeat()
+    assert beat.consecutive_failures == 0
+    assert beat.last_error == "boom"
+    assert beat.last_error_at == 100.0
+
+
+def test_only_a_tick_that_recomputed_moves_last_recompute_at(tmp_path):
+    # The pass runs every tick and is silent when the corpus is settled; recording it as
+    # a recompute anyway would make the field mean "the loop is alive", which is already
+    # what last_success_at means.
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.record_tick(True, summary="0 listed", recomputed=True, interval_s=900, now=100.0)
+    store.record_tick(True, summary="0 listed", recomputed=False, interval_s=900, now=200.0)
+
+    assert store.read_heartbeat().last_recompute_at == 100.0
+
+
+def test_the_heartbeat_is_one_overwritten_row(tmp_path):
+    # No append-only tick log (ADR-0017): history is the logs' job, and an unbounded
+    # table on the Pi's SD card buys a second retention problem.
+    db = tmp_path / "pacelab.db"
+    store = ResultStore(db)
+    for i in range(5):
+        store.record_tick(True, summary="0 listed", interval_s=900, now=float(i))
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM health").fetchone()[0] == 1
+
+
+def test_the_heartbeat_needs_no_account(tmp_path):
+    # Unkeyed by account_id on purpose: it describes the watch process, so `pacelab
+    # health` can report broken credentials without needing valid credentials itself.
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.record_tick(False, error="Account: INTERVALS_API_KEY is not set", interval_s=900,
+                      now=100.0)
+
+    assert store.read_heartbeat().last_error.startswith("Account:")
+
+
+def test_the_heartbeat_survives_an_older_database(tmp_path):
+    # The table is added to an existing corpus, not a fresh one — the Pi's db predates it.
+    db = tmp_path / "pacelab.db"
+    ResultStore(db).save("act1", make_result(), model_version="0.2.1")
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TABLE health")
+
+    reopened = ResultStore(db)
+    reopened.record_tick(True, summary="1 listed, 1 ok", interval_s=900, now=100.0)
+
+    assert reopened.read_heartbeat().last_success_at == 100.0
+    assert reopened.load("act1") == make_result()
+
+
+def test_a_failed_tick_clears_the_summary_rather_than_carrying_it_forward(tmp_path):
+    # It describes *this* tick, and a failed tick synced nothing. Keeping the old one
+    # would show a broken loop the last work it managed as if it had just done it — the
+    # error and the untouched last_success_at are what tell the story instead.
+    store = ResultStore(tmp_path / "pacelab.db")
+    store.record_tick(True, summary="5 listed, 1 ok, 4 skip", interval_s=900, now=100.0)
+
+    store.record_tick(False, error="RuntimeError: unreachable", interval_s=900, now=200.0)
+
+    assert store.read_heartbeat().last_tick_summary is None

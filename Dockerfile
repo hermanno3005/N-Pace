@@ -40,7 +40,12 @@ RUN groupadd --gid 1000 pacelab \
  && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin pacelab
 
 COPY --from=build --chown=1000:1000 /app /app
-ENV PATH="/app/.venv/bin:$PATH"
+
+# PYTHONUNBUFFERED because stdout is the watch loop's only report (ADR-0017): Python
+# block-buffers a non-tty stdout, so `docker logs -f` would lag by kilobytes — hours, at a
+# handful of lines per 15-minute tick — which defeats the point of logging at all.
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
 
 USER 1000:1000
 
