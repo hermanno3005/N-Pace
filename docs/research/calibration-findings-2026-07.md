@@ -13,8 +13,9 @@ is carried over from the original run unreproduced.
 
 ## k_grade: not identifiable from this terrain — keep the default 0.40
 
-Within-run fit says pace responds to grade-energy at only **+0.020** (IQR ±0.038, 27 runs; it
-read +0.017 ±0.019 on the corpus as it stood in the first run — same verdict either way) vs
+Within-run fit says pace responds to grade-energy at only **+0.020** (IQR 0.038 — the full
+inter-quartile width, as `Fit.spread` reports it — over 27 runs; it read +0.017, spread 0.019,
+on the corpus as it stood in the first run — same verdict either way) vs
 the researched default 0.40 (ADR-0007). The HR cross-check exposes why this is *not* a real
 athlete coefficient: **HR's response to grade is also ≈0 (−0.043)** — and constant pace at
 constant effort on a real climb is physically impossible. Conclusion: on gentle, short
@@ -51,8 +52,9 @@ Four estimates of the same coefficient (default 0.0007):
 
 One season's WBGT rises monotonically with date, so heat and fitness drift are nearly
 collinear — a single season cannot fully separate them (El Helou had 60 marathons). The two
-cuts that *do* control the confound rather than model it — 21-day pairing (0.00014) and the
-HR-conditioned fit (0.00009) — land **5× and 8× below the ported default**, and agree with
+cuts that *do* control the confound rather than model it — 21-day pairing (0.00014, carried
+over unreproduced) and the HR-conditioned fit (0.00009, rerun) — land **5× and 8× below the
+ported default**, and agree with
 each other far more closely than either between-run fit agrees with anything. That points the
 same way as ADR-0010's sun-double-count caveat: the WBGT curve over-penalizes this athlete.
 
@@ -98,7 +100,14 @@ above the 7.2 °C reference — a real spread, not a summer-only sliver.
 
 A `wbgt_a` reduction is now defensible. The two confound-controlled cuts bracket it at
 **0.00009–0.00014** — 5× to 8× below the ported 0.0007 — and anything inside that range is
-supportable; the midpoint of roughly **0.0001** is the obvious candidate. It is deliberately
+supportable; the midpoint of roughly **0.0001** is the obvious candidate.
+
+One caveat on the bracket's provenance: only its lower bound was rerun. The upper bound
+(0.00014) is the 21-day pairing, which has no shipped fit and is carried over from the
+original run, so the bracket is **mixed evidence** rather than a single reproduced result.
+This does not weaken the direction — the reproduced cut is the *lower* of the two, so a
+5–8× reduction is if anything conservative — but #27 should not read 0.00014 as freshly
+confirmed. Reproducing it means shipping a windowed-pairing fit. It is deliberately
 not the 0.00004 run-mean figure: that refit is the sensitivity check, not the estimate.
 Changing the coefficient, bumping `model_version`, and letting the recompute path republish
 the corpus is #27's call, not this document's.

@@ -71,7 +71,8 @@ stopping; progress halts, state does not corrupt.
 
 It is a failed tick in the heartbeat's sense too (ADR-0017), so it surfaces without anyone
 reading logs: the container goes unhealthy in `docker ps` once no tick has succeeded for
-45 minutes, and this names the error that did it —
+3× the configured `--interval` (45 minutes at the default 900s), and this names the error
+that did it —
 
     docker compose exec pacelab pacelab health
 
