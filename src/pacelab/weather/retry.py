@@ -9,16 +9,37 @@ explicitly: a status code means the server was reached and answered, and it will
 differently inside one tick. The 15-minute tick is the retry for anything slower-moving.
 """
 
+import json
 import logging
+import ssl
 import time
 import urllib.error
+import urllib.request
+from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
 _PAUSE_S = 1.0  # Fixed, not exponential: the server is fine, the path is not.
 
 
-def fetch_with_retry(call, *, attempts: int = 3, sleep=time.sleep):
+def fetch_json(
+    url: str, *, timeout: float, context: ssl.SSLContext, sleep=time.sleep
+) -> dict:
+    """GET ``url`` and parse the JSON body, retrying transport failures.
+
+    The unit of retry both fetchers share: one request, one timeout, one policy.
+    """
+
+    def request() -> dict:
+        with urllib.request.urlopen(url, timeout=timeout, context=context) as resp:
+            return json.load(resp)
+
+    return fetch_with_retry(request, sleep=sleep)
+
+
+def fetch_with_retry(
+    call: Callable[[], Any], *, attempts: int = 3, sleep=time.sleep
+) -> Any:
     """Call ``call()``, retrying transport failures up to ``attempts`` times.
 
     ``sleep`` is injected (``watch.py``'s precedent) so tests assert the retry without

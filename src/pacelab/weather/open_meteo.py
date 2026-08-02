@@ -11,16 +11,15 @@ Stdlib-only (urllib). Not exercised against the live API in the test suite; vali
 a real fetch before relying on field names/units.
 """
 
-import json
 import ssl
+import time
 import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 
 import certifi
 
 from pacelab.weather.conditions import Conditions
-from pacelab.weather.retry import fetch_with_retry
+from pacelab.weather.retry import fetch_json
 
 _ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 # Order matches the Conditions constructor positionally (…, pressure, solar). shortwave_
@@ -41,10 +40,12 @@ _BASE = "era5"
 
 
 class OpenMeteoFetcher:
-    # 10 s is 3x the slowest observed success, and three attempts of it cost the 30 s a
-    # single attempt used to (ADR-0020).
-    def __init__(self, timeout: float = 10.0):
+    # 10 s is 3x the slowest observed success, and three attempts of it spend the same 30 s
+    # of timeout a single attempt used to, plus two ~1 s pauses (ADR-0020). `sleep` is
+    # injected for the same reason `watch.py` injects it: tests never wait.
+    def __init__(self, timeout: float = 10.0, sleep=time.sleep):
         self._timeout = timeout
+        self._sleep = sleep
         # Explicit CA bundle so HTTPS works without relying on system certs (macOS).
         self._ssl = ssl.create_default_context(cafile=certifi.where())
 
@@ -66,14 +67,14 @@ class OpenMeteoFetcher:
                 "wind_speed_unit": "ms",
             }
         )
-        url = f"{_ARCHIVE_URL}?{query}"
-
-        def get():
-            with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
-                return json.load(resp)
-
-        # Per request, not per fetch_hourly: a stalled `era5` must not repay `era5_land`.
-        return fetch_with_retry(get)
+        # Retried per request, not per fetch_hourly: a stalled `era5` must not repay the
+        # `era5_land` call that already succeeded.
+        return fetch_json(
+            f"{_ARCHIVE_URL}?{query}",
+            timeout=self._timeout,
+            context=self._ssl,
+            sleep=self._sleep,
+        )
 
 
 def _epoch(iso: str) -> float:

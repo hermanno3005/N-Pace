@@ -7,24 +7,25 @@ series shape as the archive fetcher; used behind a WeatherService with disk_cach
 previews are never persisted.
 """
 
-import json
 import ssl
+import time
 import urllib.parse
-import urllib.request
 
 import certifi
 
 from pacelab.weather.conditions import Conditions
 from pacelab.weather.open_meteo import _HOURLY_FIELDS, _merge_series
-from pacelab.weather.retry import fetch_with_retry
+from pacelab.weather.retry import fetch_json
 
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 
 class ForecastFetcher:
-    # 10 s per attempt, three attempts — the same 30 s worst case as before (ADR-0020).
-    def __init__(self, timeout: float = 10.0):
+    # Three 10 s attempts spend the same 30 s of timeout one attempt used to, plus two ~1 s
+    # pauses (ADR-0020). `sleep` is injected so tests never wait.
+    def __init__(self, timeout: float = 10.0, sleep=time.sleep):
         self._timeout = timeout
+        self._sleep = sleep
         self._ssl = ssl.create_default_context(cafile=certifi.where())
 
     def fetch_hourly(self, lat: float, lon: float, day: str) -> list[tuple[float, Conditions]]:
@@ -39,12 +40,11 @@ class ForecastFetcher:
                 "wind_speed_unit": "ms",
             }
         )
-        url = f"{_FORECAST_URL}?{query}"
-
-        def get():
-            with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
-                return json.load(resp)
-
-        data = fetch_with_retry(get)
+        data = fetch_json(
+            f"{_FORECAST_URL}?{query}",
+            timeout=self._timeout,
+            context=self._ssl,
+            sleep=self._sleep,
+        )
         hourly = data.get("hourly", {})
         return _merge_series(hourly, {})  # single payload; merge degenerates to a parse

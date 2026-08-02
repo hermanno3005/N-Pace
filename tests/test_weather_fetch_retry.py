@@ -1,8 +1,8 @@
 """The two fetchers retry their own requests (ADR-0020).
 
-`test_weather_retry.py` covers the policy; this covers the wiring — that the retry sits
-around one HTTP call and not around `fetch_hourly`, and that the timeout budget shrank so
-three attempts cost what one used to.
+`test_weather_retry.py` owns the policy; this owns the wiring — that the retry sits around
+one HTTP call and not around `fetch_hourly`, and that the timeout budget shrank so three
+attempts spend what one used to.
 """
 
 import io
@@ -25,6 +25,7 @@ _HOUR = {
     "surface_pressure": [1013.0],
     "shortwave_radiation": [700.0],
 }
+_STALL = urllib.error.URLError("handshake timed out")
 
 
 def _payload():
@@ -38,7 +39,7 @@ class FakeUrlopen:
     """
 
     def __init__(self, outcomes):
-        self.outcomes = outcomes  # model name (or None) -> list of outcomes, consumed in order
+        self.outcomes = outcomes  # model name (or None) -> outcomes, consumed in order
         self.urls = []
         self.timeouts = []
 
@@ -52,98 +53,83 @@ class FakeUrlopen:
         return outcome
 
 
-def _install(monkeypatch, module, fake):
-    monkeypatch.setattr(f"pacelab.weather.{module}.urllib.request.urlopen", fake)
-    # The fetchers take the retry's default sleep, so shorten the pause instead of
-    # replacing it — no test may spend a real second.
-    monkeypatch.setattr("pacelab.weather.retry._PAUSE_S", 0.0)
+def _install(monkeypatch, outcomes):
+    """Script the transport and return the fake, plus a sleep that must never really wait."""
+    fake = FakeUrlopen(outcomes)
+    monkeypatch.setattr("pacelab.weather.retry.urllib.request.urlopen", fake)
+    return fake
+
+
+def _no_sleep(seconds):
+    assert seconds == 1.0  # the fixed pause, never actually waited on
 
 
 def test_the_archive_fetcher_retries_a_stalled_request(monkeypatch):
-    fake = FakeUrlopen({
-        "era5_land": [urllib.error.URLError("handshake timed out"), _payload()],
-        "era5": [_payload()],
-    })
-    _install(monkeypatch, "open_meteo", fake)
+    fake = _install(monkeypatch, {"era5_land": [_STALL, _payload()], "era5": [_payload()]})
 
-    series = OpenMeteoFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+    series = OpenMeteoFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
     assert len(series) == 1
     assert len(fake.urls) == 3
 
 
 def test_a_stalled_second_model_does_not_repay_the_first(monkeypatch):
-    # The reason the retry wraps `_request` and not `fetch_hourly`: era5_land succeeded once
-    # and must stay bought.
-    fake = FakeUrlopen({
-        "era5_land": [_payload()],
-        "era5": [urllib.error.URLError("handshake timed out"), _payload()],
-    })
-    _install(monkeypatch, "open_meteo", fake)
+    # The reason the retry wraps one request and not `fetch_hourly`: era5_land succeeded
+    # once and must stay bought.
+    fake = _install(monkeypatch, {"era5_land": [_payload()], "era5": [_STALL, _payload()]})
 
-    OpenMeteoFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+    OpenMeteoFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
-    land_calls = [u for u in fake.urls if "era5_land" in u]
-    assert len(land_calls) == 1
+    assert len([u for u in fake.urls if "era5_land" in u]) == 1
 
 
 def test_the_archive_fetcher_does_not_retry_an_http_error(monkeypatch):
-    fake = FakeUrlopen({
-        "era5_land": [urllib.error.HTTPError("http://x", 404, "Not Found", {}, None)],
-        "era5": [],
-    })
-    _install(monkeypatch, "open_meteo", fake)
+    error = urllib.error.HTTPError("http://x", 404, "Not Found", {}, None)
+    fake = _install(monkeypatch, {"era5_land": [error], "era5": []})
 
     with pytest.raises(urllib.error.HTTPError):
-        OpenMeteoFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+        OpenMeteoFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
     assert len(fake.urls) == 1
 
 
 def test_the_archive_fetcher_propagates_an_exhausted_retry(monkeypatch):
-    fake = FakeUrlopen({
-        "era5_land": [urllib.error.URLError("handshake timed out")] * 3,
-        "era5": [],
-    })
-    _install(monkeypatch, "open_meteo", fake)
+    fake = _install(monkeypatch, {"era5_land": [_STALL] * 3, "era5": []})
 
     with pytest.raises(urllib.error.URLError):
-        OpenMeteoFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+        OpenMeteoFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
     assert len(fake.urls) == 3
 
 
 def test_the_forecast_fetcher_retries_a_stalled_request(monkeypatch):
-    fake = FakeUrlopen({None: [urllib.error.URLError("handshake timed out"), _payload()]})
-    _install(monkeypatch, "forecast", fake)
+    fake = _install(monkeypatch, {None: [_STALL, _payload()]})
 
-    series = ForecastFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+    series = ForecastFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
     assert len(series) == 1
     assert len(fake.urls) == 2
 
 
-def test_the_forecast_fetcher_does_not_retry_an_http_error(monkeypatch):
-    fake = FakeUrlopen({None: [urllib.error.HTTPError("http://x", 429, "Too Many", {}, None)]})
-    _install(monkeypatch, "forecast", fake)
+def test_the_forecast_fetcher_propagates_an_exhausted_retry(monkeypatch):
+    fake = _install(monkeypatch, {None: [_STALL] * 3})
 
-    with pytest.raises(urllib.error.HTTPError):
-        ForecastFetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+    with pytest.raises(urllib.error.URLError):
+        ForecastFetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
-    assert len(fake.urls) == 1
+    assert len(fake.urls) == 3
 
 
-@pytest.mark.parametrize("module,fetcher,outcomes", [
-    ("open_meteo", OpenMeteoFetcher, {"era5_land": [_payload()], "era5": [_payload()]}),
-    ("forecast", ForecastFetcher, {None: [_payload()]}),
+@pytest.mark.parametrize("fetcher,outcomes", [
+    (OpenMeteoFetcher, {"era5_land": [_STALL, _payload()], "era5": [_payload()]}),
+    (ForecastFetcher, {None: [_STALL, _payload()]}),
 ])
-def test_the_per_attempt_timeout_leaves_the_worst_case_unchanged(
-    monkeypatch, module, fetcher, outcomes
-):
-    # 3 attempts x 10 s is the same 30 s the single attempt used to cost.
-    fake = FakeUrlopen(outcomes)
-    _install(monkeypatch, module, fake)
+def test_every_attempt_uses_the_shortened_timeout(monkeypatch, fetcher, outcomes):
+    # 10 s per attempt, retried attempts included — that is what keeps three attempts inside
+    # the 30 s of timeout a single 30 s attempt used to cost.
+    fake = _install(monkeypatch, outcomes)
 
-    fetcher().fetch_hourly(52.5, 13.4, "2026-07-07")
+    fetcher(sleep=_no_sleep).fetch_hourly(52.5, 13.4, "2026-07-07")
 
+    assert len(fake.timeouts) > 1
     assert set(fake.timeouts) == {10.0}
