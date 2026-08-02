@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import certifi
 
 from pacelab.weather.conditions import Conditions
+from pacelab.weather.retry import fetch_with_retry
 
 _ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 # Order matches the Conditions constructor positionally (…, pressure, solar). shortwave_
@@ -40,7 +41,9 @@ _BASE = "era5"
 
 
 class OpenMeteoFetcher:
-    def __init__(self, timeout: float = 30.0):
+    # 10 s is 3x the slowest observed success, and three attempts of it cost the 30 s a
+    # single attempt used to (ADR-0020).
+    def __init__(self, timeout: float = 10.0):
         self._timeout = timeout
         # Explicit CA bundle so HTTPS works without relying on system certs (macOS).
         self._ssl = ssl.create_default_context(cafile=certifi.where())
@@ -64,8 +67,13 @@ class OpenMeteoFetcher:
             }
         )
         url = f"{_ARCHIVE_URL}?{query}"
-        with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
-            return json.load(resp)
+
+        def get():
+            with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
+                return json.load(resp)
+
+        # Per request, not per fetch_hourly: a stalled `era5` must not repay `era5_land`.
+        return fetch_with_retry(get)
 
 
 def _epoch(iso: str) -> float:

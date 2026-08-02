@@ -16,12 +16,14 @@ import certifi
 
 from pacelab.weather.conditions import Conditions
 from pacelab.weather.open_meteo import _HOURLY_FIELDS, _merge_series
+from pacelab.weather.retry import fetch_with_retry
 
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
 
 class ForecastFetcher:
-    def __init__(self, timeout: float = 30.0):
+    # 10 s per attempt, three attempts — the same 30 s worst case as before (ADR-0020).
+    def __init__(self, timeout: float = 10.0):
         self._timeout = timeout
         self._ssl = ssl.create_default_context(cafile=certifi.where())
 
@@ -38,7 +40,11 @@ class ForecastFetcher:
             }
         )
         url = f"{_FORECAST_URL}?{query}"
-        with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
-            data = json.load(resp)
+
+        def get():
+            with urllib.request.urlopen(url, timeout=self._timeout, context=self._ssl) as resp:
+                return json.load(resp)
+
+        data = fetch_with_retry(get)
         hourly = data.get("hourly", {})
         return _merge_series(hourly, {})  # single payload; merge degenerates to a parse
