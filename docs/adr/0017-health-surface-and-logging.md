@@ -71,8 +71,16 @@ budget *is* something worth surfacing.
 ## `logging` replaces `warnings.warn`, for operational events only
 
 `basicConfig` at INFO, format `%(asctime)s %(levelname)-5s %(message)s`, timestamps in UTC
-(the container carries no tz data and the archive work is UTC), handler on stdout,
-`--log-level` defaulting to `$PACELAB_LOG_LEVEL`. The Dockerfile sets `PYTHONUNBUFFERED=1` —
+(pinned there by `time.gmtime`, because the archive work is UTC), handler on stdout,
+`--log-level` defaulting to `$PACELAB_LOG_LEVEL`.
+
+> Corrected at bring-up (#16): this originally read "the container carries no tz data",
+> which is false — `python:3.13-slim` ships tzdata, and compose now sets
+> `TZ=Europe/Berlin` so the rolling window's `date.today()` is the athlete's calendar day.
+> The log is UTC because `time.gmtime` pins it, deliberately, so timestamps stay
+> comparable either side of a DST change. Nothing else in this ADR depends on the claim.
+
+The Dockerfile sets `PYTHONUNBUFFERED=1` —
 without it Python block-buffers a non-tty stdout and `docker logs` lags by kilobytes, which
 defeats the purpose.
 

@@ -7,7 +7,7 @@ always-on loop with nobody watching.
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -144,20 +144,42 @@ def test_the_updater_never_prunes_images_it_does_not_own():
 
 
 def test_the_updater_drives_the_deployed_compose_file():
-    # The updater and the container must be the same deployment, not two that agree today.
-    assert f'readonly IMAGE={COMPOSE["services"]["pacelab"]["image"]}' in UPDATE
-    assert "readonly COMPOSE=$DIR/compose.yaml" in UPDATE
-    assert "readonly DIR=/home/hermi/docker/pacelab" in UPDATE
+    # The updater and the container must be the same deployment, not two that agree today
+    # — so both halves are derived from compose.yaml rather than restated here. The
+    # service directory is the parent of the bind mount: compose.yaml sits next to data/.
+    service = COMPOSE["services"]["pacelab"]
+    mount = next(str(v).rsplit(":/data", 1)[0] for v in service["volumes"] if ":/data" in str(v))
+    assert f'readonly IMAGE={service["image"]}' in UPDATE_CODE
+    assert f"readonly DIR={PurePosixPath(mount).parent}" in UPDATE_CODE
+    assert "readonly COMPOSE=$DIR/compose.yaml" in UPDATE_CODE
 
 
 def test_the_updater_is_safe_to_run_from_cron():
     # Cron gives a near-empty environment and no working directory, and fires again
     # whether or not the last run finished. Each of these has bitten someone.
     assert UPDATE.startswith("#!/usr/bin/env bash")
-    assert "set -euo pipefail" in UPDATE
-    assert "flock -n 9" in UPDATE, "overlapping updaters race to recreate the container"
-    assert "readonly DOCKER=/usr/bin/docker" in UPDATE, "cron's PATH may not have docker"
+    assert "set -euo pipefail" in UPDATE_CODE
+    assert "flock -n 9" in UPDATE_CODE, "overlapping updaters race to recreate the container"
+    assert "readonly DOCKER=/usr/bin/docker" in UPDATE_CODE, "cron's PATH may not have docker"
     assert UPDATE_SH.stat().st_mode & 0o111, "not executable"
+
+
+def test_the_runbook_records_the_cron_line_that_makes_updates_happen():
+    # ADR-0019's mechanism is a crontab entry, and a crontab entry lives on the Pi, not in
+    # this repo — so the runbook is its only record. Without it the rebuild procedure
+    # produces a deployment that runs but never updates, which is map decision 5 silently
+    # not happening. It is also the only thing that creates the update.log the runbook
+    # tells you to read: the script itself only writes to stdout.
+    runbook = (ROOT / "docs" / "runbooks" / "pi-deployment.md").read_text()
+    assert "pacelab-update.sh >> " in runbook, "the cron line is not written down anywhere"
+    assert "crontab" in runbook
+
+
+def test_the_secrets_file_never_reaches_the_image():
+    # .env holds the intervals.icu API key and is deployed next to compose.yaml. The image
+    # is public on GHCR, so a build that copied it in would publish the key.
+    ignored = (ROOT / ".dockerignore").read_text().split()
+    assert ".env" in ignored and ".env.*" in ignored
 
 
 def test_publication_is_downstream_of_green_tests():

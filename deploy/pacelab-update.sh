@@ -31,7 +31,16 @@ if ! pull_output=$($DOCKER compose -f "$COMPOSE" pull --quiet 2>&1); then
   exit 1
 fi
 
-after=$($DOCKER image inspect --format '{{.Id}}' "$IMAGE")
+# Guarded the same way `before` is. The pull can legitimately succeed without leaving this
+# tag behind: the documented rollback pins compose to a `:<sha>`, and then the pull fetches
+# that instead and `:latest` may not be present at all. Unguarded, `set -e` would abort here
+# with a raw docker error and no line in the log — the one failure this script would not
+# narrate, in exactly the situation someone is already debugging something else.
+after=$($DOCKER image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo none)
+if [ "$after" = none ]; then
+  say "pulled, but $IMAGE is not present — compose is pinned elsewhere; leaving it alone"
+  exit 0
+fi
 [ "$before" = "$after" ] && exit 0
 
 say "new image ${after#sha256:}"

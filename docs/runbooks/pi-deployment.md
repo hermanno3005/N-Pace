@@ -42,7 +42,15 @@ containers. It colours `docker compose ps` and gives a future notifier something
 ## Updates
 
 Hourly, at :17, from `hermi`'s crontab — `pacelab-update.sh` pulls `:latest` and re-ups only
-if the digest moved (ADR-0019). It prints nothing when nothing changed, so:
+if the digest moved (ADR-0019). This line **is** the mechanism, and a crontab lives on the
+Pi rather than in this repo, so it is written down here and nowhere else — install it with
+`crontab -e` (no `sudo`; it belongs to `hermi`):
+
+    # PaceLab: follow :latest from GHCR (ADR-0019). Quiet unless something changed.
+    17 * * * * /home/hermi/docker/pacelab/pacelab-update.sh >> /home/hermi/docker/pacelab/update.log 2>&1
+
+That redirect is also the only thing that creates `update.log` — the script itself just
+writes to stdout. It prints nothing when nothing changed, so:
 
     cat update.log        # empty, or one entry per update that actually landed
 
@@ -70,14 +78,36 @@ decision 2). From a laptop clone holding the good `pacelab.db`:
     scp compose.yaml deploy/pacelab-update.sh .env hermi@192.168.1.104:docker/pacelab/
     rsync -a pacelab.db .cache hermi@192.168.1.104:docker/pacelab/data/
 
-Then bring it up and check it reads what you sent, *before* starting the loop:
+**Run `pacelab recompute` on the laptop first.** ADR-0016's pass fires on the Pi's very
+first tick, and a corpus seeded mid-bump means the Pi's first act is rewriting rows and
+republishing annotations over SSH, against the only copy, on the aged SD card. Settle it
+where a failure is debuggable. (Skipped at bring-up, which is why that first tick found
+three stale activities and took a snapshot instead of being the intended no-op. It worked
+— but that is the thing this step exists to avoid.)
 
-    docker compose run --rm --entrypoint pacelab pacelab trend | tail
+Then check the Pi reads back exactly what you sent, *before* starting the loop. Counts, not
+vibes — a wrong bind-mount path shows up as an empty or unexpectedly small corpus, and a
+cache the container cannot see shows up as a cache-miss storm on the first tick:
+
+    docker compose run --rm --entrypoint python pacelab -c "
+    import sqlite3; c = sqlite3.connect('/data/pacelab.db')
+    print('activities', c.execute('select count(*) from activities').fetchone()[0])
+    print('segments  ', c.execute('select count(*) from segments').fetchone()[0])
+    print('versions  ', c.execute('select model_version, count(*) from activities group by 1').fetchall())"
+
+    find data/.cache/weather -type f | wc -l      # ~190; must be non-zero, or ERA5 gets re-fetched
+    find data/.cache/activities -type f | wc -l   # ~154 FITs, nested under intervals-<athlete>/
+
+At bring-up (2026-08-02) that read **64 activities / 5752 segments**, all at `0.2.1`. The
+curated seed was 55 / 5041 — the difference is real activities synced since curation, not a
+seeding fault. Compare against the laptop you copied from, not against these numbers.
+
     docker compose run --rm pacelab watch --ticks 1     # one pass, in the foreground
     docker compose up -d
 
 `--ticks 1` is worth the extra minute: it runs a complete pass with the output in front of
 you instead of into `docker logs`, and a corpus that landed wrong shows up immediately.
+Finally, install the cron line above — a deployment without it runs but never updates.
 
 ## When something looks wrong
 
