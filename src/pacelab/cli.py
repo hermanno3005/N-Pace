@@ -343,7 +343,12 @@ def _run_calibrate(args) -> int:
 
 
 def _configure_logging(level: str) -> None:
-    """One stream, timestamped, UTC — the container carries no tz data (ADR-0017).
+    """One stream, timestamped, UTC — pinned there, not left there (ADR-0017).
+
+    The UTC is `time.gmtime` below and nothing else. The container *does* carry tz data and
+    compose sets `TZ=Europe/Berlin`, because the rolling window's `date.today()` has to be
+    the athlete's calendar day (#16) — so without this line the log would quietly follow it
+    into local time, and timestamps either side of a DST change would stop being comparable.
 
     stdout rather than stderr: `docker logs` merges them, and a daemon's operational log
     is its normal output, not an error channel. The level is set after `basicConfig`,
