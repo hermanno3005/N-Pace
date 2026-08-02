@@ -17,6 +17,11 @@ WORKFLOW_TEXT = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
 WORKFLOW = yaml.safe_load(WORKFLOW_TEXT)
 JOBS = WORKFLOW["jobs"]
 COMPOSE = yaml.safe_load((ROOT / "compose.yaml").read_text())
+UPDATE_SH = ROOT / "deploy" / "pacelab-update.sh"
+UPDATE = UPDATE_SH.read_text()
+# What the updater *runs*, with the commentary stripped — several of the invariants below
+# are about commands not being there, and a comment explaining why would satisfy them.
+UPDATE_CODE = "\n".join(ln for ln in UPDATE.splitlines() if not ln.lstrip().startswith("#"))
 
 # `FROM image@sha256:...` and `COPY --from=image@sha256:...` alike. A bare `COPY --from=build`
 # names an earlier stage rather than a registry image, so it carries neither `/` nor `:`.
@@ -92,6 +97,67 @@ def test_data_is_a_bind_mount_not_a_named_volume():
     # Not the directory holding this file: .env sits next to it, and /data is the one
     # place the container writes.
     assert all(s.rstrip("/") not in (".", "./") for s in sources), f"{sources} mounts .env"
+
+
+def test_the_pi_pulls_a_published_image_rather_than_building():
+    # #16: the Pi follows :latest, built and gated by CI (map decision 5). A `build:` here
+    # would compile on the Pi from whatever source happened to be sitting on it — outside
+    # the test gate that is the only thing protecting an unattended loop.
+    service = COMPOSE["services"]["pacelab"]
+    assert "build" not in service, "the Pi must not build its own image"
+    assert service["image"] == "ghcr.io/hermanno3005/pacelab:latest"
+
+
+def test_compose_follows_the_tag_ci_publishes():
+    # The two halves of the delivery path, asserted against each other rather than by eye:
+    # a rename on either side that missed the other would leave the Pi pinned to a tag
+    # nothing pushes any more, still running, quietly frozen at the last good digest.
+    assert COMPOSE["services"]["pacelab"]["image"] in _publish_step()["with"]["tags"].split("\n")
+
+
+def test_the_bind_mount_is_the_pinned_absolute_host_path():
+    # #16 pins the Pi's layout (#11's convention: ~/docker/<service>/). Absolute, because
+    # a relative source resolves against the directory compose is invoked from, and the
+    # update timer runs from cron with no working directory to speak of.
+    service = COMPOSE["services"]["pacelab"]
+    sources = [str(v).rsplit(":/data", 1)[0] for v in service["volumes"] if ":/data" in str(v)]
+    assert sources == ["/home/hermi/docker/pacelab/data"]
+
+
+def test_the_containers_calendar_day_is_the_athletes():
+    # watch.tick() derives its rolling window from date.today(), and intervals.icu dates
+    # are the athlete's local dates. An unset TZ leaves the container on UTC, so between
+    # midnight and 02:00 Berlin the window's newest edge is yesterday and a just-uploaded
+    # run is not listed at all. Logs stay UTC regardless — cli forces time.gmtime.
+    assert COMPOSE["services"]["pacelab"]["environment"]["TZ"] == "Europe/Berlin"
+
+
+def test_the_updater_never_prunes_images_it_does_not_own():
+    # ADR-0019. The Pi is a live Home Assistant box (#11) that this loop is a guest on. A
+    # `docker image prune` reclaims every dangling image on the host, and a superseded
+    # image is untagged — so HA's and PaceLab's are indistinguishable by anything except
+    # the id captured before the pull. The blast radius of getting this wrong is somebody
+    # else's smart home, so it is a test rather than a comment.
+    assert "image prune" not in UPDATE_CODE
+    assert "system prune" not in UPDATE_CODE
+    assert 'rmi "$before"' in UPDATE_CODE
+
+
+def test_the_updater_drives_the_deployed_compose_file():
+    # The updater and the container must be the same deployment, not two that agree today.
+    assert f'readonly IMAGE={COMPOSE["services"]["pacelab"]["image"]}' in UPDATE
+    assert "readonly COMPOSE=$DIR/compose.yaml" in UPDATE
+    assert "readonly DIR=/home/hermi/docker/pacelab" in UPDATE
+
+
+def test_the_updater_is_safe_to_run_from_cron():
+    # Cron gives a near-empty environment and no working directory, and fires again
+    # whether or not the last run finished. Each of these has bitten someone.
+    assert UPDATE.startswith("#!/usr/bin/env bash")
+    assert "set -euo pipefail" in UPDATE
+    assert "flock -n 9" in UPDATE, "overlapping updaters race to recreate the container"
+    assert "readonly DOCKER=/usr/bin/docker" in UPDATE, "cron's PATH may not have docker"
+    assert UPDATE_SH.stat().st_mode & 0o111, "not executable"
 
 
 def test_publication_is_downstream_of_green_tests():

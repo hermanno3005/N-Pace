@@ -1,24 +1,39 @@
 # On the Pi: put INTERVALS_API_KEY / INTERVALS_ATHLETE_ID in .env next to this file,
-# then `docker compose up -d --build`. Annotations appear within ~15 min of a run upload.
+# then `docker compose up -d`. Annotations appear within ~15 min of a run upload.
+#
+# This file is deployed to /home/hermi/docker/pacelab/compose.yaml and is the one copy
+# that matters — see docs/runbooks/pi-deployment.md. It pulls a published image; it never
+# builds. Updates are ADR-0019's cron timer, not a rebuild here.
 #
 # Backups: the loop snapshots the corpus to /data/snapshots before any model-version
 # rewrite, and `docker compose exec pacelab pacelab snapshot` writes one by hand. Pulling
 # one off the Pi and restoring it are in docs/runbooks/corpus-snapshots.md (ADR-0018).
 services:
   pacelab:
-    build: .
+    # The tag CI publishes on green main (#15), which is the only thing that may reach the
+    # Pi. Built natively for arm64 and public, so this pull needs no credentials at all.
+    image: ghcr.io/hermanno3005/pacelab:latest
     env_file: .env
+    environment:
+      # watch.tick() builds its rolling window from date.today(), and the dates
+      # intervals.icu files activities under are the athlete's local dates. Unset, the
+      # container would sit on UTC and spend 00:00–02:00 Berlin asking for a window that
+      # ends yesterday — an early-morning run would not be listed until 02:00. tzdata is
+      # already in python:3.13-slim, so this costs nothing. Logs are unaffected: cli.py
+      # pins the log formatter to time.gmtime, deliberately, so they stay UTC.
+      TZ: Europe/Berlin
     volumes:
       # A bind mount, not a named volume (ADR-0015): the corpus stays an ordinary file
       # that sqlite3 and scp can reach from the host.
       #
-      # Deliberately relative, and deliberately a *subdirectory*. The Pi's convention is
+      # Absolute, and deliberately a *subdirectory*. The Pi's convention is
       # ~/docker/<service>/ per service (#11), so this file lives at
-      # /home/hermi/docker/pacelab/compose.yaml and the corpus lands in
-      # /home/hermi/docker/pacelab/data/. Mounting the service directory itself would put
-      # .env inside the container's own writable state directory — so the corpus goes one
-      # level down, and #16 makes this same path absolute when it pins the Pi's layout.
-      - ./data:/data
+      # /home/hermi/docker/pacelab/compose.yaml and the corpus lands one level down, in
+      # data/ — mounting the service directory itself would put .env inside the
+      # container's own writable state directory. Absolute rather than relative because
+      # ADR-0019's update timer runs from cron, which has no working directory worth
+      # relying on; `docker compose -f <path>` does not chdir for you.
+      - /home/hermi/docker/pacelab/data:/data
     # The image runs as uid 1000, which is the Pi's first login account. Uncomment and set
     # PUID/PGID in .env if this host's account differs — otherwise the container fails
     # loudly on its first write rather than corrupting anything.
