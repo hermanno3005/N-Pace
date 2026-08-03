@@ -14,9 +14,10 @@ The bind mount is live as of #16, so `scp` reaches the snapshots directly — no
 
 ## What writes a snapshot
 
-Automatically, inside the watch loop: a recompute pass that is about to **rewrite rows at a
-new `model_version`** snapshots first. Nothing else does — not an ordinary tick, not a
-publish retry, not a provisional finalizing.
+Automatically, inside the watch loop: a recompute pass snapshots immediately before the first
+row it **rewrites at a new `model_version`**. Nothing else does — not an ordinary tick, not a
+publish retry, not a provisional finalizing, and not a pass that only *finds* stale rows and
+then skips them all `no-weather` (which is what the days after a bump look like, #37).
 
 By hand, whenever you want one — in particular **after curating the corpus** (deleting rows,
 editing types), because curation between version bumps is the one thing the automatic
@@ -24,9 +25,13 @@ trigger does not capture:
 
     docker compose exec pacelab pacelab snapshot
 
-It prints the archive it wrote and its size, keeps the last 10, and repoints
-`snapshots/latest.tar.gz`. If it fails, it says so and exits non-zero — a failed snapshot is
-never reported as a success.
+It prints the archive it wrote and its size, prunes, and repoints `snapshots/latest.tar.gz`.
+If it fails, it says so and exits non-zero — a failed snapshot is never reported as a success.
+
+Archives are named `<UTC stamp>-<model_version>.tar.gz` for the version the corpus was at when
+they were taken. Pruning keeps the last 10 archives **plus** the newest archive of each of the
+last 5 versions — so the state before a bump survives however many snapshots follow it. To find
+the corpus as it last stood at 0.2.1, take the newest `*-0.2.1.tar.gz`.
 
 ## Pull one off the Pi
 
@@ -76,7 +81,7 @@ that did it —
 
 The two failures worth expecting:
 
-- **`no space left on device`** — check `df -h /`. Snapshots are bounded at 10, so the
+- **`no space left on device`** — check `df -h /`. Snapshots are bounded at 15 (~10 MB), so the
   culprit is usually the FIT cache or Home Assistant's own recorder, not this.
 - **`copied database failed integrity_check` / row-count mismatch** — the *source* db is
   damaged. Do not overwrite the latest good snapshot by re-running by hand; restore from

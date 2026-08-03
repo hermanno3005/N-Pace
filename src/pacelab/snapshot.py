@@ -5,7 +5,9 @@ cache, together ~1.8 MB. The FIT cache is 87% of the bytes and is deliberately e
 intervals.icu holds the authoritative copy, so losing it costs a re-download, not data.
 
 Each snapshot is one `.tar.gz` whose members are relative to the data directory, so the
-restore runbook is `tar -xzf latest.tar.gz -C <data>` and nothing else.
+restore runbook is `tar -xzf latest.tar.gz -C <data>` and nothing else. It is named for the
+`model_version` its corpus is stamped at — see ``_prune``, where that name is what makes
+retention survive a trigger that fires more often than it should.
 
 Two things here are load-bearing rather than incidental:
 
@@ -19,6 +21,7 @@ Two things here are load-bearing rather than incidental:
 """
 
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
@@ -26,8 +29,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-KEEP = 10  # deep enough to walk back several model bumps, bounded so it can't fill the card
+KEEP = 10  # recency: the last few states, whatever produced them
+KEEP_VERSIONS = 5  # depth: the corpus as it last stood at each of the last five versions
 LATEST = "latest.tar.gz"
+
+# `2026-08-03T051719Z-0.2.1.tar.gz` — a UTC stamp, then the corpus version it carries.
+_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}Z(?:-(?P<version>.+))?\.tar\.gz$")
+_UNSAFE = re.compile(r"[^A-Za-z0-9._]")
 
 
 class SnapshotError(RuntimeError):
@@ -39,8 +47,9 @@ class SnapshotError(RuntimeError):
 
 
 def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
-                   keep: int = KEEP, now: datetime | None = None) -> Path:
-    """Write one verified snapshot to ``out_dir``, prune to the last ``keep``.
+                   keep: int = KEEP, keep_versions: int = KEEP_VERSIONS,
+                   now: datetime | None = None) -> Path:
+    """Write one verified snapshot to ``out_dir``, then prune (see ``_prune``).
 
     Returns the archive path. ``latest.tar.gz`` is repointed at it by a *relative* symlink,
     so the link still resolves on the Pi's host side of the bind mount.
@@ -55,7 +64,8 @@ def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
     # Seconds, not just minutes: a hand-run snapshot straight after an automatic one is
     # the expected case (curate, then snapshot), and it must not silently replace it.
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H%M%SZ")
-    archive = out_dir / f"{stamp}.tar.gz"
+    version = _corpus_version(db_path)
+    archive = out_dir / (f"{stamp}-{version}.tar.gz" if version else f"{stamp}.tar.gz")
 
     # Stage inside out_dir so the copy, the verification and the archive all land on one
     # filesystem, and so a crash mid-snapshot leaves a temp dir rather than a half archive.
@@ -70,7 +80,7 @@ def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
             members.append((staged_weather, _member_name(weather_dir, db_path.parent)))
         _write_archive(archive, members)
 
-    _prune(out_dir, keep)
+    _prune(out_dir, keep, keep_versions)
     _point_latest(out_dir, archive)
     return archive
 
@@ -149,9 +159,66 @@ def _snapshots(out_dir: Path) -> list[Path]:
     return sorted(p for p in out_dir.glob("*.tar.gz") if p.name != LATEST)
 
 
-def _prune(out_dir: Path, keep: int) -> None:
-    for old in _snapshots(out_dir)[:-keep]:  # keep >= 1 (checked before anything is written)
-        old.unlink()
+def _version_of(archive: Path) -> str | None:
+    """The corpus ``model_version`` an archive carries, or None if its name predates it."""
+    match = _NAME.match(archive.name)
+    return match.group("version") if match else None
+
+
+def _corpus_version(db_path: Path) -> str | None:
+    """The model version most of the corpus is stamped at, or None if it has none.
+
+    Most, not all: a snapshot is taken *before* a rewrite, so its corpus is whatever the
+    last completed bump left — plus, straight after one, a handful of rows the archive's
+    publication lag has not let through yet. The majority is what the archive is *of*.
+    A bump only half-way through therefore still names the *old* version, which is what
+    ``_prune`` relies on to tell it apart from the snapshot taken before the bump began.
+
+    Unscoped by account, unlike everything in ``store``: the archive holds every account's
+    rows, so its name has to describe all of them.
+    """
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                # The tie-break is arbitrary but deterministic — versions sort as strings
+                # here, which is not their order, and nothing downstream reads it as one.
+                "SELECT model_version FROM activities WHERE model_version IS NOT NULL "
+                "GROUP BY model_version ORDER BY COUNT(*) DESC, model_version DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.DatabaseError:
+        return None  # an unreadable db still fails loudly in verification, not here
+    return _UNSAFE.sub("_", row[0]) if row and row[0] else None
+
+
+def _prune(out_dir: Path, keep: int, keep_versions: int) -> None:
+    """Keep the last ``keep`` archives, plus the *first* archive of each recent version.
+
+    The count alone made retention depend on the trigger being rare, and #37 showed what
+    that costs: a trigger bug fired the guard every fifteen minutes and the pre-bump
+    archive — the single snapshot the mechanism exists to produce — was evicted by the
+    noise it had caused, inside three hours. Bounded at ``keep + keep_versions``, so it
+    still cannot fill the card.
+
+    **First**, not last, and the difference is the whole value of the slot. A snapshot is
+    taken before a rewrite, so the first archive stamped version V holds the corpus as it
+    stood before anything at V had been touched. A bump does not land in one pass — rows
+    inside the archive's publication lag are rewritten over the following days, and each
+    of those rewrites snapshots a half-bumped corpus that still counts as V. Giving the
+    slot to the newest would hand it to one of those and evict the untouched one.
+
+    It also makes the two rules complement rather than overlap: the version slot protects
+    the old archive, which is exactly the one the recency count cannot.
+    """
+    archives = _snapshots(out_dir)  # oldest first
+    survivors = set(archives[-keep:])  # keep >= 1 (checked before anything is written)
+    first_at: dict[str | None, Path] = {}
+    for archive in archives:
+        first_at.setdefault(_version_of(archive), archive)
+    if keep_versions > 0:  # name order is time order, so the last slots are the recent ones
+        survivors.update(sorted(first_at.values())[-keep_versions:])
+    for old in archives:
+        if old not in survivors:
+            old.unlink()
 
 
 def _point_latest(out_dir: Path, archive: Path) -> None:
