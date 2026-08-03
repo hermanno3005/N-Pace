@@ -112,6 +112,12 @@ not the 0.00004 run-mean figure: that refit is the sensitivity check, not the es
 Changing the coefficient, bumping `model_version`, and letting the recompute path republish
 the corpus is #27's call, not this document's.
 
+**#27 acted on this.** `wbgt_a` is now **0.0001** — the bracket midpoint — in `Config`, with
+`model_version` at **0.3.0**. The ported 0.0007 stays as `DEFAULT_WBGT_A` in `models/heat.py`,
+the population default the athlete's value departs from (ADR-0006). The bump makes every
+stored row stale, so ADR-0016's recompute pass rewrites and republishes the corpus, snapshot
+first (ADR-0018).
+
 ## Method lessons folded back
 
 - Junk micro-segments and a solar-less weather cache were both caught *by* the calibration

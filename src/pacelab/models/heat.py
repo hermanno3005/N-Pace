@@ -6,8 +6,10 @@ the v1 **NWS Heat Index** (temperature + humidity only) — the persisted per-se
 value being NULL is the fallback's confidence tag. Each index maps to a fractional pace
 penalty by a power-law anchored to El Helou (2012), zero at or below its own reference.
 
-Coefficients are provisional (like grade's k_grade) — grounded in
-docs/research/wbgt-heat-model.md, to be personalised by calibration (ADR-0006).
+The coefficients here are the *population* values — grounded in
+docs/research/wbgt-heat-model.md, ported from El Helou (2012). Calibration personalises them
+in `Config` (ADR-0006), which is what the pipeline actually runs on: `wbgt_a` is configured
+at 0.0001 for this athlete, 7x below the 0.0007 default below.
 """
 
 import math
@@ -22,7 +24,8 @@ DEFAULT_HEAT_A = 0.0018  # Heat Index power-law scale
 DEFAULT_HEAT_B = 1.5  # Heat Index curvature
 
 # WBGT curve (v0.2, ADR-0010): reference and coefficients grounded in
-# docs/research/wbgt-heat-model.md. Provisional pending ADR-0006 calibration.
+# docs/research/wbgt-heat-model.md. `a` was calibrated down to 0.0001 in Config (ADR-0006);
+# this stays the population default for anyone without a fit of their own.
 WBGT_REF_C = 7.2
 DEFAULT_WBGT_A = 0.0007
 DEFAULT_WBGT_B = 2.0  # El Helou's fit is explicitly quadratic
