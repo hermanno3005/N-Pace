@@ -56,6 +56,19 @@ def test_calibrate_states_the_single_version_quietly(tmp_path, capsys):
     assert "MIXED" not in out
 
 
+def test_calibrate_compares_fits_against_the_configured_coefficient(tmp_path, capsys):
+    # Once calibration has moved a coefficient off its ported default, "keeping default
+    # 0.0007" is a lie: an abstention keeps whatever config carries, which is now 0.0001.
+    db = tmp_path / "pacelab.db"
+    ResultStore(db).save("i1", _result(1.0), Config().model_version, account_id=ACCOUNT)
+
+    assert main(["calibrate", "--db", str(db)]) == 0
+
+    out = capsys.readouterr().out
+    assert str(Config().wbgt_a) in out
+    assert "0.0007" not in out
+
+
 def test_recompute_command_runs_the_pass(tmp_path, capsys, monkeypatch):
     calls = {}
 

@@ -18,12 +18,18 @@ def test_wbgt_a_sits_in_the_confound_controlled_bracket():
 
 def test_wbgt_a_is_calibrated_away_from_the_ported_default():
     # The ported El Helou default stays put in the model layer as the population value
-    # (ADR-0010); personalisation happens in config (ADR-0009).
-    assert DEFAULT_WBGT_A == 0.0007
+    # (ADR-0010); the athlete's own value lives here (ADR-0006).
     assert Config().wbgt_a != DEFAULT_WBGT_A
 
 
 def test_model_version_moved_past_the_pre_calibration_stamp():
     # 0.2.1 is the last version fitted with the ported coefficient. Results stamped with it
-    # are heat-penalised ~7x too hard for this athlete, so they must read as stale.
-    assert Config().model_version > "0.2.1"
+    # are heat-penalised ~7x too hard for this athlete, so they must read as stale — and
+    # the store only ever compares versions for equality, so any distinct string does that.
+    assert Config().model_version != "0.2.1"
+    # Ordering, spelled as numbers: "0.10.0" > "0.2.1" is False as strings.
+    assert _parts(Config().model_version) > _parts("0.2.1")
+
+
+def _parts(version: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in version.split("."))

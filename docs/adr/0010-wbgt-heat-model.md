@@ -42,8 +42,9 @@ scale* than air temperature (even dry/calm/shade, WBGT ≠ T_air), so the coeffi
   gives `a ≈ 0.0007`. Provisional pending Phase-3 calibration (ADR-0006).
   **Calibration has since run** (July 2026): `a` is now **0.0001** in config, 7× below the
   ported value, per the confound-controlled cuts in
-  `docs/research/calibration-findings-2026-07.md`. `DEFAULT_WBGT_A` keeps the 0.0007 port as
-  the population default in `models/heat.py`; personalisation lives in config (ADR-0009).
+  `docs/research/calibration-findings-2026-07.md` — which also settles the sun-double-count
+  caveat below in the direction it feared. `DEFAULT_WBGT_A` keeps the 0.0007 port as the
+  population default in `models/heat.py`; the athlete's value lives in `Config` (ADR-0006).
 
 ## Implementation hazards (from the research)
 

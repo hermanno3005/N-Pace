@@ -31,11 +31,9 @@ class Config:
     k_grade: float = DEFAULT_GRADE_SENSITIVITY
     # WBGT heat curve (v0.2 primary, ADR-0010)
     wbgt_ref_c: float = WBGT_REF_C
-    # Calibrated for this athlete, not the ported default (which stays in models/heat.py as
-    # the population value, ADR-0009's personalisation seam). The two cuts that control the
-    # season confound — equal-HR (0.00009, ADR-0014) and 21-day pairing (0.00014) — bracket
-    # it 5-8x below El Helou's 0.0007; 0.0001 is the midpoint.
-    # See docs/research/calibration-findings-2026-07.md.
+    # Calibrated for this athlete (ADR-0006); models/heat.py keeps the ported 0.0007 as the
+    # population default. Bracket, provenance and diagnostics:
+    # docs/research/calibration-findings-2026-07.md.
     wbgt_a: float = 0.0001
     wbgt_b: float = DEFAULT_WBGT_B
     # Heat Index curve (fallback when solar data is unavailable)

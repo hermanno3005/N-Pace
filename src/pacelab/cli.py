@@ -301,9 +301,10 @@ def _run_calibrate(args) -> int:
     from pacelab.calibrate import (
         fit_hr_conditioned_wbgt_a, fit_k_grade, fit_wbgt_a, is_steady,
     )
-    from pacelab.models.grade import DEFAULT_GRADE_SENSITIVITY
-    from pacelab.models.heat import DEFAULT_WBGT_A
-
+    # Compare fits against what is *configured*, not against the ported population
+    # defaults: once calibration has moved a coefficient (wbgt_a, ADR-0006), an abstention
+    # keeps the configured value, and that is the number worth printing.
+    config = Config()
     account_id = Account.from_env().storage_id
     store = ResultStore(args.db)
     results = [r for r in (store.load(p.activity_id, account_id=account_id)
@@ -314,21 +315,22 @@ def _run_calibrate(args) -> int:
 
     k = fit_k_grade(results)
     if k is None:
-        print(f"k_grade : insufficient data — keeping default {DEFAULT_GRADE_SENSITIVITY}")
+        print(f"k_grade : insufficient data — keeping configured {config.k_grade}")
     else:
-        print(f"k_grade : {k.value:.3f}   (default {DEFAULT_GRADE_SENSITIVITY}; "
+        print(f"k_grade : {k.value:.3f}   (configured {config.k_grade}; "
               f"IQR {k.spread:.3f} over {k.n_runs} hilly steady runs)")
 
-    a = fit_wbgt_a(results, k_grade=k.value if k else DEFAULT_GRADE_SENSITIVITY)
+    k_grade = k.value if k else config.k_grade
+    a = fit_wbgt_a(results, k_grade=k_grade)
     if a is None:
-        print(f"wbgt_a  : insufficient data/spread — keeping default {DEFAULT_WBGT_A}")
+        print(f"wbgt_a  : insufficient data/spread — keeping configured {config.wbgt_a}")
     else:
-        print(f"wbgt_a  : {a.value:.5f} (default {DEFAULT_WBGT_A}; R²={a.r2:.2f}, "
+        print(f"wbgt_a  : {a.value:.5f} (configured {config.wbgt_a}; R²={a.r2:.2f}, "
               f"residual ±{a.spread:.1f} s/km over {a.n_runs} steady runs)")
 
     # The HR-conditioned cut (ADR-0014): pace at equal HR, hot vs cool. Intent-proof, so
     # it is the one the findings doc treats as decisive.
-    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k.value if k else DEFAULT_GRADE_SENSITIVITY)
+    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k_grade)
     if hr is None:
         print("wbgt_a  : (at equal HR) insufficient data/spread, or HR and heat too "
               "collinear to separate")
