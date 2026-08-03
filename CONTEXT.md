@@ -108,9 +108,11 @@ _Avoid_: backfill, reprocess, migration, resync.
 
 **Snapshot**:
 One verified `.tar.gz` of the two irreplaceable parts of the corpus — the curated
-`pacelab.db` and the pinned weather cache (ADR-0018). Written before a **recompute**
-rewrites rows at a new `model_version`, and by hand after curating. Verified at write
-time (integrity check + row counts), or it is a failure, not a warning. The two files it
+`pacelab.db` and the pinned weather cache (ADR-0018). Written immediately before a
+**recompute** rewrites its first row at a new `model_version`, and by hand after curating —
+a pass that finds stale rows but rewrites none of them writes no snapshot. Named for the
+version of the corpus it carries, which is what keeps it through later ones. Verified at
+write time (integrity check + row counts), or it is a failure, not a warning. The two files it
 carries are the **backup set**; the FIT cache is not in it, because intervals.icu holds the
 authoritative copy.
 _Avoid_: dump, export, archive (that's the `.tar.gz` file, not the act).

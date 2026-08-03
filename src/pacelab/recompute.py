@@ -40,21 +40,19 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
     ``force`` walks every stored row regardless of drift — what a pipeline change wants,
     and how to exercise a bump without editing ``config.py``.
 
-    ``before_rewrite`` runs once, before the first row is touched, and only when this pass
-    will actually rewrite rows — the corpus snapshot (ADR-0018). It is deliberately not
-    guarded: if it raises, the pass aborts with the corpus untouched, which is the whole
-    point of taking it.
+    ``before_rewrite`` runs once, immediately before the first row is *written*, and only
+    when that write replaces a row stamped at an older version — the corpus snapshot
+    (ADR-0018). It is deliberately not guarded: if it raises, the pass aborts with the
+    corpus untouched, which is the whole point of taking it.
     """
     activity_ids = (store.activity_ids(account_id) if force
                     else store.needs_recompute(config.model_version, account_id))
-    if before_rewrite is not None and _rewrites_rows(store, activity_ids, config,
-                                                     account_id, force):
-        before_rewrite()
+    snapshot = _Once(before_rewrite)
     outcomes: list[tuple[str, str]] = []
     for activity_id in activity_ids:
         was_provisional = store.is_provisional(activity_id, account_id=account_id)
-        if (not force and not was_provisional
-                and store.is_current(activity_id, config.model_version, account_id)):
+        stored_current = store.is_current(activity_id, config.model_version, account_id)
+        if not force and not was_provisional and stored_current:
             # Stored current, only the annotation is missing. Analysis converges
             # absolutely — it runs once per activity per bump (ADR-0016) — so a row that
             # publishing keeps failing on is retried forever without being re-analysed.
@@ -77,6 +75,8 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
         if result.distance_m == 0:
             outcomes.append((activity_id, "no-track"))
             continue
+        if force or not stored_current:
+            snapshot()  # ADR-0018, and never after the row it guards
         store.save(activity_id, result, config.model_version, account_id=account_id)
         published = try_publish(provider, store, activity_id, config.model_version, account_id)
         if not published:
@@ -86,20 +86,32 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
     return outcomes
 
 
-def _rewrites_rows(store: ResultStore, activity_ids: list[str], config: Config,
-                   account_id: str, force: bool) -> bool:
-    """True when this pass will replace stored rows — i.e. a ``model_version`` bump.
+class _Once:
+    """The ADR-0018 snapshot hook, fired at most once and only when a rewrite is imminent.
 
-    Deliberately narrower than "the pass found work", because two kinds of enumerated row
-    recur on ordinary weeks and neither is destructive. A publish-only retry (stored
-    current, annotation still owed) rewrites no row at all and is enumerated on *every*
-    pass until intervals.icu accepts the write. A provisional finalization at the current
-    version replaces one preview whose loss costs a re-analysis, not data. Snapshotting on
-    either would fire the guard weekly at the aged SD card, for events it was not built for.
+    The gate is per-row and *lazy* rather than a question asked up front about the corpus,
+    because the up-front question cannot be answered honestly: whether a stale row will be
+    rewritten depends on whether the archive has published its day yet, which is only known
+    once the analysis has been attempted. Asking "are there stale rows?" instead armed the
+    guard for days after a bump (#37) — the last few activities stay inside ERA5's
+    publication lag, are enumerated every tick and skipped ``no-weather``, and stay stale.
+    Snapshotting for them wrote 96 archives a day and evicted the pre-bump snapshot the
+    whole mechanism exists to produce.
 
-    What is left is the event ADR-0018 names: a row stamped at an older version, i.e. a
-    ``model_version`` bump about to rewrite the whole corpus at once.
+    Firing here is still *before* the first write, which is the property that matters — a
+    snapshot taken after the row it guards protects nothing.
+
+    Two kinds of enumerated row deliberately do not reach this at all, because they recur on
+    ordinary weeks and neither is destructive. A publish-only retry (stored current,
+    annotation still owed) rewrites no row and is enumerated on *every* pass until
+    intervals.icu accepts the write. A provisional finalization at the current version
+    replaces one preview whose loss costs a re-analysis, not data.
     """
-    return bool(activity_ids) and (
-        force or store.has_stale_version(config.model_version, account_id)
-    )
+
+    def __init__(self, hook):
+        self._hook = hook
+
+    def __call__(self) -> None:
+        if self._hook is not None:
+            hook, self._hook = self._hook, None
+            hook()

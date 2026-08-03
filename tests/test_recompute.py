@@ -70,6 +70,23 @@ class LaggingArchive:
         raise WeatherUnavailable("no archive weather for 2026-07-27 yet")
 
 
+class _LaggingOnce(ArchiveService):
+    """The archive as it is mid-lag: the oldest run is still missing, the rest are there.
+
+    One raise is one skipped activity — ``WeatherUnavailable`` propagates out of the first
+    segment enrichment, so no later segment of that run asks again.
+    """
+
+    def __init__(self):
+        self._calls = 0
+
+    def conditions_at(self, lat, lon, t):
+        self._calls += 1
+        if self._calls == 1:
+            raise WeatherUnavailable("no archive weather for 2026-07-27 yet")
+        return super().conditions_at(lat, lon, t)
+
+
 def _stub_result():
     seg = SegmentResult(0, 100.0, 0.0, 30.0, 12.0, 55.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                         300.0, 298.0, False)
@@ -222,16 +239,51 @@ def test_a_version_bump_snapshots_before_the_first_row_is_rewritten(tmp_path):
     # and every public description republished, unattended. It must land before the
     # first write, not alongside it.
     provider, store = _fixture(tmp_path)
-    _stranded_provisional(store)
+    _stranded_provisional(store, "i100")
+    _stranded_provisional(store, "i200")
     config = Config()
-    events = []
-    provider.downloaded = _Recording(events, "download")
+    events = _watch_writes(store)
 
     recompute(provider, ArchiveService(), store, config, ACCOUNT,
               before_rewrite=lambda: events.append("snapshot"))
 
     assert events[0] == "snapshot"
+    assert events.count("save") == 2
     assert events.count("snapshot") == 1  # once per pass, not once per activity
+
+
+def test_stale_rows_that_the_pass_only_skips_take_no_snapshot(tmp_path):
+    # The bug of #37: after a bump, activities still inside ERA5's publication lag stay
+    # stamped at the old version for days. They are enumerated every tick and skipped
+    # `no-weather` — untouched. "Stale rows exist" fired the guard every 15 minutes and
+    # evicted the one snapshot the bump had correctly produced.
+    provider, store = _fixture(tmp_path)
+    _stranded_provisional(store)
+    config = Config()
+    taken = []
+
+    outcomes = recompute(provider, LaggingArchive(), store, config, ACCOUNT,
+                         before_rewrite=lambda: taken.append("snapshot"))
+
+    assert outcomes == [("i100", "no-weather")]
+    assert taken == []
+
+
+def test_a_bump_still_snapshots_when_an_in_lag_row_is_enumerated_first(tmp_path):
+    # The mixed corpus a bump actually leaves: a few in-lag rows the pass will decline
+    # and the rest it will rewrite. The declined rows must not suppress the snapshot,
+    # and it must still land before the first row that *is* rewritten.
+    provider, store = _fixture(tmp_path)
+    _stranded_provisional(store, "i100")  # enumerated first, skipped no-weather
+    _stranded_provisional(store, "i200")
+    config = Config()
+    events = _watch_writes(store)
+
+    recompute(provider, _LaggingOnce(), store, config, ACCOUNT,
+              before_rewrite=lambda: events.append("snapshot"))
+
+    assert events == ["snapshot", "save"]
+    assert store.is_current("i200", config.model_version, account_id=ACCOUNT)
 
 
 def test_a_settled_corpus_takes_no_snapshot(tmp_path):
@@ -293,20 +345,26 @@ def test_a_failed_snapshot_aborts_the_pass_with_the_corpus_untouched(tmp_path):
         recompute(provider, ArchiveService(), store, config, ACCOUNT,
                   before_rewrite=failing_snapshot)
 
-    assert provider.downloaded == []
+    # The original was downloaded and analysed before the guard could know a rewrite was
+    # imminent — both are reads. Nothing that outlives the pass was written.
     assert provider.descriptions == {}
     assert store.is_current("i100", OLD_VERSION, account_id=ACCOUNT)
     assert store.is_provisional("i100", account_id=ACCOUNT)
     assert store.needs_recompute(config.model_version, ACCOUNT) == ["i100"]  # next tick
 
 
-class _Recording(list):
-    """A list that also notes each append on a shared event log, to order two calls."""
+def _watch_writes(store):
+    """Return an event log that records ``"save"`` for every row the pass rewrites.
 
-    def __init__(self, events, label):
-        super().__init__()
-        self._events, self._label = events, label
+    The snapshot's contract is about *writes*, not about reaching an activity: the pass
+    downloads and analyses before it knows whether the row can be rewritten at all.
+    """
+    events = []
+    original = store.save
 
-    def append(self, item):
-        self._events.append(self._label)
-        super().append(item)
+    def recording_save(*args, **kwargs):
+        events.append("save")
+        return original(*args, **kwargs)
+
+    store.save = recording_save
+    return events

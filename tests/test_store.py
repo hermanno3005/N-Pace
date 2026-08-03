@@ -229,19 +229,16 @@ def test_version_counts_reports_the_corpus_breakdown(tmp_path):
     assert store.version_counts("acct") == [("0.2.1", 3), ("0.2.0", 1)]
 
 
-def test_has_stale_version_sees_only_rows_that_need_rewriting(tmp_path):
-    # ADR-0018's snapshot trigger. A row that owes an annotation is drifted but not
-    # stale — it is rewritten by nothing, and it recurs on every pass.
+def test_is_current_separates_a_stale_row_from_one_that_merely_owes_an_annotation(tmp_path):
+    # ADR-0018's snapshot gate reads this per row. A row that owes an annotation is
+    # drifted but not stale — nothing rewrites it, and it recurs on every pass.
     store = ResultStore(tmp_path / "pacelab.db")
     store.save("act1", make_result(), model_version="0.2.1")
-    assert not store.has_stale_version("0.2.1")
+    assert store.is_current("act1", "0.2.1")
     assert store.needs_recompute("0.2.1") == ["act1"]  # drifted: never published
 
-    store.mark_published("act1", "0.2.1")
-    assert not store.has_stale_version("0.2.1")
-
     store.save("act2", make_result(), model_version="0.2.0")
-    assert store.has_stale_version("0.2.1")
+    assert not store.is_current("act2", "0.2.1")
 
 
 def test_an_unversioned_row_counts_as_stale(tmp_path):
@@ -251,7 +248,8 @@ def test_an_unversioned_row_counts_as_stale(tmp_path):
     with sqlite3.connect(tmp_path / "pacelab.db") as conn:
         conn.execute("UPDATE activities SET model_version = NULL")
 
-    assert store.has_stale_version("0.2.1")
+    assert not store.is_current("act1", "0.2.1")
+    assert store.needs_recompute("0.2.1") == ["act1"]
 
 
 # --- the heartbeat (ADR-0017) -------------------------------------------------------

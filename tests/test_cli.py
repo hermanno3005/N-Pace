@@ -185,7 +185,12 @@ def test_a_failed_snapshot_fails_the_recompute_command(tmp_path, capsys, monkeyp
     def failing_snapshot(*args, **kwargs):
         raise SnapshotError("no space left on device")
 
+    def pass_reaching_a_rewrite(*args, before_rewrite=None, **kwargs):
+        before_rewrite()  # the pass is about to replace a stale row
+        raise AssertionError("the pass must not continue past a failed snapshot")
+
     monkeypatch.setattr("pacelab.cli.write_snapshot", failing_snapshot)
+    monkeypatch.setattr("pacelab.cli.recompute", pass_reaching_a_rewrite)
     db = tmp_path / "pacelab.db"
     store = ResultStore(db)
     store.save("i1", _result(1.0), "0.2.0", account_id=ACCOUNT)  # stale: a bump to rewrite

@@ -195,20 +195,6 @@ class ResultStore:
             ).fetchall()
         return [r[0] for r in rows]
 
-    def has_stale_version(self, model_version: str, account_id: str = "local") -> bool:
-        """True when any stored row was stamped at a different model version.
-
-        The narrow half of drift: rows that must be *rewritten*, as opposed to rows that
-        merely still owe an annotation. What ADR-0018's snapshot trigger asks about.
-        """
-        with self._connect() as conn:
-            row = conn.execute(
-                # IS NOT, as in needs_recompute: a NULL version is stale, and != misses it.
-                "SELECT 1 FROM activities WHERE account_id = ? AND model_version IS NOT ? "
-                "LIMIT 1", (account_id, model_version),
-            ).fetchone()
-        return row is not None
-
     def activity_ids(self, account_id: str = "local") -> list[str]:
         """Every stored activity for an account — what a forced recompute walks."""
         with self._connect() as conn:

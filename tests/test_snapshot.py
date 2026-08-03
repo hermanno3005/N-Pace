@@ -34,6 +34,12 @@ def _corpus(root, n_activities=2):
     return db, weather
 
 
+def _bump(db, model_version):
+    """Rewrite the corpus at a new model version, as a recompute pass would."""
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE activities SET model_version = ?", (model_version,))
+
+
 def _snapshots(root):
     return root / "snapshots"
 
@@ -180,6 +186,68 @@ def test_pruning_keeps_the_last_ten_and_latest_follows(tmp_path):
     latest = _snapshots(tmp_path) / "latest.tar.gz"
     assert latest.is_symlink()
     assert latest.resolve() == written[-1].resolve()
+
+
+def test_a_snapshot_is_named_for_the_model_version_of_the_corpus_it_carries(tmp_path):
+    # Retention needs to know what each archive is *of*. The version is not recoverable
+    # from a `.tar.gz` without opening it, so it goes in the name.
+    db, weather = _corpus(tmp_path)
+
+    archive = write_snapshot(db, weather, _snapshots(tmp_path))
+
+    assert archive.name.endswith("-0.2.1.tar.gz")
+
+
+def test_the_last_snapshot_of_a_superseded_version_survives_a_burst(tmp_path):
+    # #37: a bug in the trigger fired the guard every 15 minutes after a bump, and ten
+    # count-based slots evicted the pre-bump snapshot within 2 h 30 m — the one archive
+    # the whole mechanism exists to produce. Retention must not depend on the trigger
+    # being correct: the corpus as it last stood at each version is kept by name.
+    from datetime import datetime, timedelta, timezone
+
+    db, weather = _corpus(tmp_path)
+    start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
+    pre_bump = write_snapshot(db, weather, _snapshots(tmp_path), now=start)
+
+    _bump(db, "0.2.2")
+    for i in range(1, 20):
+        write_snapshot(db, weather, _snapshots(tmp_path), now=start + timedelta(minutes=15 * i))
+
+    assert pre_bump.exists()
+    assert pre_bump.name.endswith("-0.2.1.tar.gz")
+
+
+def test_version_retention_is_bounded_so_it_cannot_fill_the_card(tmp_path):
+    # The reason the count exists at all: an aged SD card that also carries Home
+    # Assistant's recorder. Depth is bounded by versions kept, not by versions seen.
+    from datetime import datetime, timedelta, timezone
+
+    db, weather = _corpus(tmp_path)
+    start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
+    for i in range(20):
+        _bump(db, f"0.3.{i}")
+        write_snapshot(db, weather, _snapshots(tmp_path), now=start + timedelta(hours=i),
+                       keep=3, keep_versions=2)
+
+    kept = [p.name for p in _snapshots(tmp_path).glob("*.tar.gz") if p.name != "latest.tar.gz"]
+    assert len(kept) <= 5
+
+
+def test_an_empty_corpus_still_snapshots_under_an_unversioned_name(tmp_path):
+    # A fresh Pi, and the pre-#37 archives already on disk: no version to key on, so
+    # they fall back to the count and are still pruned rather than accumulating.
+    from datetime import datetime, timedelta, timezone
+
+    db = tmp_path / "pacelab.db"
+    ResultStore(db)
+    weather = tmp_path / ".cache" / "weather"
+    start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
+
+    written = [write_snapshot(db, weather, _snapshots(tmp_path), keep=2,
+                              now=start + timedelta(hours=i)) for i in range(4)]
+
+    assert written[0].name == "2026-08-03T050000Z.tar.gz"
+    assert [p for p in written if p.exists()] == written[-2:]
 
 
 def test_latest_is_relative_so_it_survives_being_moved(tmp_path):
