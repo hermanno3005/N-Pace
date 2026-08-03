@@ -390,10 +390,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_snapshots_dir(recompute_p)
 
     snapshot_p = sub.add_parser(
-        "snapshot", help="write a verified corpus snapshot, keeping the last 10 (ADR-0018)"
+        "snapshot",
+        help="write a verified corpus snapshot, pruning to the last 10 plus the first "
+             "snapshot of each of the last 5 model versions (ADR-0018)"
     )
     snapshot_p.add_argument("--keep", type=int, default=KEEP,
-                            help="how many snapshots to retain")
+                            help="how many recent snapshots to retain")
     _add_common(snapshot_p)
     _add_snapshots_dir(snapshot_p)
 

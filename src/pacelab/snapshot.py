@@ -47,8 +47,8 @@ class SnapshotError(RuntimeError):
 
 
 def write_snapshot(db_path: Path, weather_dir: Path, out_dir: Path,
-                   keep: int = KEEP, now: datetime | None = None,
-                   keep_versions: int = KEEP_VERSIONS) -> Path:
+                   keep: int = KEEP, keep_versions: int = KEEP_VERSIONS,
+                   now: datetime | None = None) -> Path:
     """Write one verified snapshot to ``out_dir``, then prune (see ``_prune``).
 
     Returns the archive path. ``latest.tar.gz`` is repointed at it by a *relative* symlink,
@@ -171,10 +171,17 @@ def _corpus_version(db_path: Path) -> str | None:
     Most, not all: a snapshot is taken *before* a rewrite, so its corpus is whatever the
     last completed bump left — plus, straight after one, a handful of rows the archive's
     publication lag has not let through yet. The majority is what the archive is *of*.
+    A bump only half-way through therefore still names the *old* version, which is what
+    ``_prune`` relies on to tell it apart from the snapshot taken before the bump began.
+
+    Unscoped by account, unlike everything in ``store``: the archive holds every account's
+    rows, so its name has to describe all of them.
     """
     try:
         with sqlite3.connect(db_path) as conn:
             row = conn.execute(
+                # The tie-break is arbitrary but deterministic — versions sort as strings
+                # here, which is not their order, and nothing downstream reads it as one.
                 "SELECT model_version FROM activities WHERE model_version IS NOT NULL "
                 "GROUP BY model_version ORDER BY COUNT(*) DESC, model_version DESC LIMIT 1"
             ).fetchone()
@@ -183,24 +190,32 @@ def _corpus_version(db_path: Path) -> str | None:
     return _UNSAFE.sub("_", row[0]) if row and row[0] else None
 
 
-def _prune(out_dir: Path, keep: int, keep_versions: int = KEEP_VERSIONS) -> None:
-    """Keep the last ``keep`` archives, plus the last archive of each recent version.
+def _prune(out_dir: Path, keep: int, keep_versions: int) -> None:
+    """Keep the last ``keep`` archives, plus the *first* archive of each recent version.
 
     The count alone made retention depend on the trigger being rare, and #37 showed what
     that costs: a trigger bug fired the guard every fifteen minutes and the pre-bump
     archive — the single snapshot the mechanism exists to produce — was evicted by the
-    noise it had caused, inside three hours. Since a snapshot is taken before a rewrite,
-    the *newest* archive at version V is the corpus as it last stood at V, so keeping one
-    per version is exactly "deep enough to walk back several model bumps" and cannot be
-    consumed by a burst. Bounded at ``keep + keep_versions``, so it still cannot fill the
-    card.
+    noise it had caused, inside three hours. Bounded at ``keep + keep_versions``, so it
+    still cannot fill the card.
+
+    **First**, not last, and the difference is the whole value of the slot. A snapshot is
+    taken before a rewrite, so the first archive stamped version V holds the corpus as it
+    stood before anything at V had been touched. A bump does not land in one pass — rows
+    inside the archive's publication lag are rewritten over the following days, and each
+    of those rewrites snapshots a half-bumped corpus that still counts as V. Giving the
+    slot to the newest would hand it to one of those and evict the untouched one.
+
+    It also makes the two rules complement rather than overlap: the version slot protects
+    the old archive, which is exactly the one the recency count cannot.
     """
     archives = _snapshots(out_dir)  # oldest first
     survivors = set(archives[-keep:])  # keep >= 1 (checked before anything is written)
-    newest_at: dict[str | None, Path] = {}
+    first_at: dict[str | None, Path] = {}
     for archive in archives:
-        newest_at[_version_of(archive)] = archive
-    survivors.update(sorted(newest_at.values())[-keep_versions:] if keep_versions else [])
+        first_at.setdefault(_version_of(archive), archive)
+    if keep_versions > 0:  # name order is time order, so the last slots are the recent ones
+        survivors.update(sorted(first_at.values())[-keep_versions:])
     for old in archives:
         if old not in survivors:
             old.unlink()

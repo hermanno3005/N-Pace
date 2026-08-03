@@ -3,6 +3,8 @@
 import sqlite3
 import tarfile
 import threading
+from datetime import datetime, timedelta, timezone
+from functools import partial
 
 import pytest
 
@@ -34,10 +36,18 @@ def _corpus(root, n_activities=2):
     return db, weather
 
 
-def _bump(db, model_version):
-    """Rewrite the corpus at a new model version, as a recompute pass would."""
+def _bump(db, model_version, ids=None):
+    """Rewrite the corpus at a new model version, as a recompute pass would.
+
+    ``ids`` rewrites only some of it — a bump still working through rows the archive's
+    publication lag has not released yet.
+    """
     with sqlite3.connect(db) as conn:
-        conn.execute("UPDATE activities SET model_version = ?", (model_version,))
+        if ids is None:
+            conn.execute("UPDATE activities SET model_version = ?", (model_version,))
+        else:
+            conn.executemany("UPDATE activities SET model_version = ? WHERE activity_id = ?",
+                             [(model_version, i) for i in ids])
 
 
 def _snapshots(root):
@@ -171,17 +181,17 @@ def test_a_snapshot_that_fails_verification_leaves_nothing_behind(tmp_path, monk
 
 
 def test_pruning_keeps_the_last_ten_and_latest_follows(tmp_path):
-    from datetime import datetime, timedelta, timezone
-
     db, weather = _corpus(tmp_path)
     start = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
     written = [write_snapshot(db, weather, _snapshots(tmp_path), now=start + timedelta(hours=i))
-               for i in range(12)]
+               for i in range(13)]
 
     kept = sorted(p.name for p in _snapshots(tmp_path).glob("*.tar.gz")
                   if p.name != "latest.tar.gz")
-    assert kept == sorted(p.name for p in written[2:])  # the two oldest are gone
-    assert len(kept) == 10
+    # The last ten by count, and the first — one corpus version here, so one slot, and it
+    # holds the earliest state at that version.
+    assert kept == sorted(p.name for p in [written[0], *written[3:]])
+    assert len(kept) == 11
 
     latest = _snapshots(tmp_path) / "latest.tar.gz"
     assert latest.is_symlink()
@@ -198,13 +208,33 @@ def test_a_snapshot_is_named_for_the_model_version_of_the_corpus_it_carries(tmp_
     assert archive.name.endswith("-0.2.1.tar.gz")
 
 
+def test_a_half_finished_bump_does_not_take_the_old_versions_slot(tmp_path):
+    # A bump does not land in one pass: rows inside ERA5's publication lag are rewritten
+    # over the following days, and each of those rewrites is snapshotted too. While the
+    # lagged rows are still the majority, those archives carry the *old* version's name.
+    # If the slot went to the newest of them, the pre-bump archive — the only one holding
+    # a corpus nothing had rewritten yet — would lose it to a half-bumped corpus.
+    db, weather = _corpus(tmp_path, n_activities=5)
+    start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
+    snapshot = partial(write_snapshot, db, weather, _snapshots(tmp_path), keep=2)
+    pre_bump = snapshot(now=start)
+
+    _bump(db, "0.2.2", ids=["i0", "i1"])  # two rewritten, three still inside the lag
+    mid_bump = snapshot(now=start + timedelta(days=1))
+    for i in range(2, 5):  # later bumps, enough to push both out of the last two
+        _bump(db, f"0.3.{i}")
+        snapshot(now=start + timedelta(days=i))
+
+    assert mid_bump.name.endswith("-0.2.1.tar.gz")  # majority is still the old version
+    assert pre_bump.exists()  # holds 0.2.1's slot: nothing in it had been rewritten
+    assert not mid_bump.exists()
+
+
 def test_the_last_snapshot_of_a_superseded_version_survives_a_burst(tmp_path):
     # #37: a bug in the trigger fired the guard every 15 minutes after a bump, and ten
     # count-based slots evicted the pre-bump snapshot within 2 h 30 m — the one archive
     # the whole mechanism exists to produce. Retention must not depend on the trigger
     # being correct: the corpus as it last stood at each version is kept by name.
-    from datetime import datetime, timedelta, timezone
-
     db, weather = _corpus(tmp_path)
     start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
     pre_bump = write_snapshot(db, weather, _snapshots(tmp_path), now=start)
@@ -220,8 +250,6 @@ def test_the_last_snapshot_of_a_superseded_version_survives_a_burst(tmp_path):
 def test_version_retention_is_bounded_so_it_cannot_fill_the_card(tmp_path):
     # The reason the count exists at all: an aged SD card that also carries Home
     # Assistant's recorder. Depth is bounded by versions kept, not by versions seen.
-    from datetime import datetime, timedelta, timezone
-
     db, weather = _corpus(tmp_path)
     start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
     for i in range(20):
@@ -234,20 +262,19 @@ def test_version_retention_is_bounded_so_it_cannot_fill_the_card(tmp_path):
 
 
 def test_an_empty_corpus_still_snapshots_under_an_unversioned_name(tmp_path):
-    # A fresh Pi, and the pre-#37 archives already on disk: no version to key on, so
-    # they fall back to the count and are still pruned rather than accumulating.
-    from datetime import datetime, timedelta, timezone
-
+    # A fresh Pi, and the pre-#37 archives already on disk: no version to key on. They
+    # form one "unknown" group holding one slot between them, so they are pruned rather
+    # than accumulating — the property that matters for names already on the card.
     db = tmp_path / "pacelab.db"
     ResultStore(db)
     weather = tmp_path / ".cache" / "weather"
     start = datetime(2026, 8, 3, 5, 0, tzinfo=timezone.utc)
 
     written = [write_snapshot(db, weather, _snapshots(tmp_path), keep=2,
-                              now=start + timedelta(hours=i)) for i in range(4)]
+                              now=start + timedelta(hours=i)) for i in range(6)]
 
     assert written[0].name == "2026-08-03T050000Z.tar.gz"
-    assert [p for p in written if p.exists()] == written[-2:]
+    assert [p for p in written if p.exists()] == [written[0], *written[-2:]]
 
 
 def test_latest_is_relative_so_it_survives_being_moved(tmp_path):
@@ -310,8 +337,6 @@ def test_a_weather_cache_outside_the_data_root_still_restores_into_place(tmp_pat
 def test_two_snapshots_in_the_same_minute_are_both_kept(tmp_path):
     # Curate, then `pacelab snapshot` by hand, right after the loop took one: the manual
     # snapshot must not silently replace the automatic one.
-    from datetime import datetime, timedelta, timezone
-
     db, weather = _corpus(tmp_path)
     at = datetime(2026, 7, 28, 20, 15, 0, tzinfo=timezone.utc)
     first = write_snapshot(db, weather, _snapshots(tmp_path), now=at)

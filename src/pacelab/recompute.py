@@ -41,13 +41,14 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
     and how to exercise a bump without editing ``config.py``.
 
     ``before_rewrite`` runs once, immediately before the first row is *written*, and only
-    when that write replaces a row stamped at an older version — the corpus snapshot
-    (ADR-0018). It is deliberately not guarded: if it raises, the pass aborts with the
-    corpus untouched, which is the whole point of taking it.
+    when that write replaces a row stamped at an older version — or when ``force`` makes
+    every write a replacement by definition. That is the corpus snapshot (ADR-0018). It is
+    deliberately not guarded: if it raises, the pass aborts with the corpus untouched,
+    which is the whole point of taking it.
     """
     activity_ids = (store.activity_ids(account_id) if force
                     else store.needs_recompute(config.model_version, account_id))
-    snapshot = _Once(before_rewrite)
+    snapshot = _SnapshotOnce(before_rewrite)
     outcomes: list[tuple[str, str]] = []
     for activity_id in activity_ids:
         was_provisional = store.is_provisional(activity_id, account_id=account_id)
@@ -86,7 +87,7 @@ def recompute(provider, service, store: ResultStore, config: Config, account_id:
     return outcomes
 
 
-class _Once:
+class _SnapshotOnce:
     """The ADR-0018 snapshot hook, fired at most once and only when a rewrite is imminent.
 
     The gate is per-row and *lazy* rather than a question asked up front about the corpus,

@@ -93,26 +93,51 @@ runs `PRAGMA integrity_check`, and asserts the activity and segment counts match
 unverified backup is a hypothesis, and the moment to falsify it is at write time — not at 2am
 on the day it is needed.
 
+> **Amended (August 2026, #37): retention is no longer a count alone.** A count is only
+> "several bumps deep" while the trigger is rare, and it turned out to depend on that
+> entirely — a trigger bug fired the guard every fifteen minutes and the pre-bump archive was
+> evicted by the noise it had caused, inside three hours. Retention should not be one bug away
+> from discarding the thing it exists to hold, so it is now keyed on what each archive is *of*
+> as well as on how many followed it.
+>
+> Each archive is named for the `model_version` the majority of its corpus is stamped at —
+> `2026-08-03T051719Z-0.2.1.tar.gz` — and pruning keeps the **first** archive at each of the
+> last **5** versions on top of the last 10 archives. First, not last: a snapshot is taken
+> *before* a rewrite, so the first archive stamped V holds the corpus before anything at V had
+> been touched. A bump does not land in one pass — rows inside the publication lag are
+> rewritten over the following days, and those snapshots still name V while the lagged rows
+> are the majority — so the *newest* V would be a half-bumped corpus. It also makes the two
+> rules complement rather than overlap: the version slot protects the old archive, which is
+> exactly the one the recency count cannot. Still bounded, at most 15 archives (~10 MB).
+>
+> Names written before this carry no version. They parse as one "unknown" group holding a
+> single slot between them, so archives already on the Pi prune rather than accumulate.
+
 The last **10** are kept, oldest pruned at write time. Bounded, so this can never fill the card;
 deep enough to walk back several bumps, which matters because a bad recompute is typically
 noticed late, after further bumps have buried it.
 
-**Refined after #37.** A count is only "several bumps deep" while the trigger is rare, and it
-turned out to depend on that entirely: a trigger bug fired the guard every fifteen minutes and
-the pre-bump archive was evicted by the noise it had caused, inside three hours. Retention
-should not be one bug away from discarding the thing it exists to hold, so it is now keyed on
-what each archive is *of* rather than only on how many followed it.
-
-Each archive is named for the `model_version` the majority of its corpus is stamped at —
-`2026-08-03T051719Z-0.2.1.tar.gz` — and pruning keeps the last **5** distinct versions in
-addition to the last 10 archives. Because a snapshot is taken *before* a rewrite, the newest
-archive at version V is the corpus as it last stood at V: exactly the pre-bump state, held by
-name rather than by luck. Still bounded — at most 15 archives, ~10 MB.
-
-Names written before this are unversioned; they parse as a single "unknown" group and are
-retained by count alone, so old archives on the Pi prune rather than accumulate.
-
 ## The trigger is a recompute that has work to do
+
+> **Amended (August 2026, #37): the trigger is per row and lazy, not a question asked up
+> front.** "A stale row exists" is still not "a row will be rewritten". Activities inside
+> ERA5's publication lag stay stamped at the old version for days after a bump: the pass
+> enumerates them every tick, cannot get archive weather for them, and skips them
+> `no-weather` — untouched, still stale, arming the trigger again on the next tick. Observed
+> on the Pi as 96 snapshots a day rewriting nothing, which then evicted the pre-bump archive.
+>
+> The honest answer is that the question cannot be asked up front at all: whether a stale row
+> will be rewritten depends on whether the archive has published its day, which is known only
+> once the analysis has been attempted. So the gate fires immediately before the first
+> `store.save()` that replaces a row stamped at an older version. That keeps the property that
+> matters — the snapshot precedes the first write, and a snapshot taken after the row it
+> guards protects nothing — while costing the trigger nothing it was entitled to. A pass that
+> only skips rows now writes nothing and snapshots nothing.
+>
+> It gives up one thing knowingly: the download and analysis of the first rewritten activity
+> now happen *before* the snapshot. Both are reads — a cache hit and a pure computation — so
+> the corpus is still untouched when the guard fires, and a failed snapshot still leaves the
+> corpus exactly as the pass found it.
 
 ADR-0016's store-driven pass runs on every tick but almost always finds nothing. The snapshot
 fires only when it finds rows to rewrite — that is, on a `model_version` bump.
@@ -137,25 +162,6 @@ a week and costs a re-analysis, not data. Snapshotting on either would fire seve
 week and, worse, consume the ten retention slots with routine events, burying the pre-bump
 snapshot the depth exists for. So the implemented trigger is a stored `model_version` that
 differs from the running one (or `--force`, which rewrites everything by definition).
-
-**Refined again after #37**, because "a stale row exists" is still not "a row will be
-rewritten". Activities inside ERA5's publication lag stay stamped at the old version for days
-after a bump: the pass enumerates them every tick, cannot get archive weather for them, and
-skips them `no-weather` — untouched, still stale, arming the trigger again on the next tick.
-Observed on the Pi as 96 snapshots a day rewriting nothing.
-
-The honest answer is that the question cannot be asked up front at all: whether a stale row
-will be rewritten depends on whether the archive has published its day, which is known only
-once the analysis has been attempted. So the gate is per row and **lazy** — it fires
-immediately before the first `store.save()` that replaces a row stamped at an older version.
-That keeps the property that matters (the snapshot precedes the first write; a snapshot taken
-after the row it guards protects nothing) while costing the trigger nothing it was entitled
-to. A pass that only skips rows now writes nothing and snapshots nothing.
-
-It gives up one thing knowingly: the download and analysis of the first rewritten activity now
-happen *before* the snapshot. Both are reads — a cache hit and a pure computation — so the
-corpus is still untouched at the moment the guard fires, and a snapshot that fails still leaves
-the corpus exactly as the pass found it.
 
 ## Snapshot failure fails the tick
 
