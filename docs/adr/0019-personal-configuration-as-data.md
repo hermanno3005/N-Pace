@@ -1,11 +1,13 @@
-# Coefficients become data, and their values reach `model_version`
+# Personal configuration is data, and its coefficients reach `model_version`
 
-The seven numbers that turn a **Pace Penalty** into a slowing were fitted to one athlete's
-corpus in one location (`docs/research/calibration-findings-2026-07.md`). They live in
-`config.py`, so anyone else who runs `pacelab analyze` gets a **Normalized Pace** computed
-with my heat curve and calls it theirs, and the only way to change that is to fork and edit
-`src/`. `pacelab calibrate` makes this worse rather than better: it reports coefficients the
-athlete has nowhere to put.
+The seven numbers that turn conditions into a **Pace Penalty** are researched defaults
+(ADR-0007, ADR-0010) that ADR-0006 always intended calibration to personalise, and the one
+calibration run there is was fitted against one athlete's corpus in one location
+(`docs/research/calibration-findings-2026-07.md`). They live in `config.py`, so anyone who
+runs `pacelab analyze` gets a **Normalized Pace** computed with somebody else's heat curve
+and calls it theirs, and the only way to change that is to fork and edit `src/`. `pacelab
+calibrate` makes this worse rather than better: it reports coefficients the athlete has
+nowhere to put.
 
 This ADR decides that the coefficients — and the reference altitude — become data supplied
 per installation through an optional `pacelab.toml`, read from the directory holding the
@@ -28,6 +30,14 @@ bind-mounted corpus directory, so the file arrives through a mount that already 
   `reference_temp_c` is a term of the **Reference Conditions**, and those are frozen
   (ADR-0002). Neither is a personal tunable.
 - **`model_version` is never settable.** It is derived, never declared.
+
+`wbgt_ref_c` sits closest to that line and is admitted deliberately. ADR-0002's amendment
+defines it as "the WBGT at 10 °C / 50% RH / no wind / no sun", so it looks like a term of the
+frozen baseline rather than a tunable. But the frozen thing is that phrase; `7.2` is what one
+particular closed-form WBGT approximation returns when evaluated at it (ADR-0010), which
+makes the number a coefficient of the heat curve — the curve's zero-point — and not the
+definition. An installation that re-fits its heat curve has to be able to move its zero with
+it. `reference_temp_c` is different: `10.0` *is* the definition, written down.
 
 ## Filling the home-altitude slot does not unfreeze ADR-0002
 
@@ -59,9 +69,18 @@ code, and the version is a string in the same file, bumped by hand in the same c
 two come apart. Editing `wbgt_a` in `pacelab.toml` changes every number the engine produces
 while leaving the declared version untouched; the corpus stays stamped as current,
 **Recompute** enumerates nothing, and history silently disagrees with itself. Worse, it
-disagrees *invisibly*: the annotations on intervals.icu still look current, and a `calibrate`
-fit would run across a corpus whose rows were produced by two different models without saying
-so — the mixed-corpus failure ADR-0016 went out of its way to make loud.
+disagrees *invisibly*. Every **Annotation** on intervals.icu still reads as current, and the
+version breakdown ADR-0016 added to `calibrate`'s header — the surface built precisely to
+make a mixed corpus loud — reports a single uniform version, because a divergence that never
+reaches the stamp is one no reader of the corpus can see.
+
+The damage is confined to the model's *outputs*, which is exactly the scope the stamp guards.
+ADR-0016 establishes that calibration reads only raw columns, so "a **coefficient** bump
+(`wbgt_a`, `k_grade`) … leaves every column calibration touches bit-identical, and a mixed
+corpus is provably harmless" for fitting. That holds here unchanged: a coefficient supplied
+by file is still a coefficient bump. What is not harmless is a corpus of stored NPs and
+published annotations produced by two models under one version — and that is what the digest
+prevents.
 
 So the effective coefficient values are canonicalised and hashed into a short stable digest
 appended to the declared version: `0.2.1+<digest>`. Derived from the values themselves, not
@@ -79,9 +98,7 @@ for free. A bad re-tune is recoverable by the path that already exists.
 It is declared in `Config` and read nowhere in `src/`: an inert slot documenting the altitude
 term of the **Reference Conditions**, with no air-density model behind it yet. A value that
 cannot change a stored number must not invalidate a stored number, so changing the reference
-altitude leaves the version — and therefore the whole corpus — alone. The alternative would
-charge a full re-analysis and a republish of every **Annotation** for a change that alters
-nothing.
+altitude leaves the version — and therefore the whole corpus — alone.
 
 If a future model consumes it, it moves into the digest in the same commit that makes it
 load-bearing.
@@ -101,12 +118,11 @@ a real change.
 
 ## Rejected: a README caveat
 
-The obvious cheap alternative is to say it in prose — "these coefficients were fitted to one
-athlete; your numbers will be somewhat wrong" — and stop there. It was rejected because it
-documents the limitation instead of removing it. The reader learns that their **Normalized
-Pace** is not theirs and is given nothing to do about it short of forking, and `pacelab
-calibrate` remains a report with no destination. A caveat that cannot be acted on is an
-apology, not a decision.
+The obvious cheap alternative is to say it in prose — "these coefficients are not yours; your
+numbers will be somewhat wrong" — and stop there. It was rejected because it documents the
+limitation instead of removing it. The reader learns that their **Normalized Pace** is not
+theirs and is given nothing to do about it short of forking, and `pacelab calibrate` remains
+a report with no destination. A caveat that cannot be acted on is an apology, not a decision.
 
 ## Rejected: bumping the declared version by hand on a re-tune
 
@@ -115,3 +131,12 @@ Keeping `model_version` hand-written and asking the operator to bump it after ed
 consistency depend on remembering. The failure is silent, unbounded in time, and lands on the
 one surface — history — the version stamp exists to protect. Deriving the suffix removes the
 opportunity to forget.
+
+## Surface
+
+    <corpus dir>/pacelab.toml      # optional; absent means today's defaults
+    model_version = 0.2.1          # no file, or a file restating every default
+    model_version = 0.2.1+<digest> # any coefficient differing from its default
+
+Beside the results database, not in the process working directory — which is what makes the
+lookup survive the container, where `compose.yaml` needs no change.
