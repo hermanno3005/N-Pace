@@ -27,7 +27,7 @@ from pathlib import Path
 
 from pacelab.account import Account
 from pacelab.app import analyze_file
-from pacelab.config import Config
+from pacelab.config import ConfigError, config_path, load_config
 from pacelab.health import format_health, is_healthy
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
@@ -91,11 +91,13 @@ def _emit(activity_id, result, config, args) -> None:
 
 def _run_analyze(args) -> int:
     path = args.path
+    # Configuration first: a typo in `pacelab.toml` invalidates the run whatever is on the
+    # path, and reporting "no activities found" instead would hide it.
+    config = load_config(args.db, apply_wind=args.apply_wind)
     files = sorted(p for p in path.iterdir() if p.suffix.lower() in _SUFFIXES) if path.is_dir() else [path]
     if not files:
         print(f"No FIT/GPX activities found at {path}", file=sys.stderr)
         return 1
-    config = Config(apply_wind=args.apply_wind)
     store = ResultStore(args.db)
     service = _weather(args.cache_dir)
     for f in files:
@@ -119,7 +121,7 @@ class _SyncContext:
     def __init__(self, args, logged: bool = False):
         self.args = args
         self.logged = logged
-        self.config = Config(apply_wind=args.apply_wind)
+        self.config = load_config(args.db, apply_wind=args.apply_wind)
         account = Account.from_env()
         self.account_id = account.storage_id  # one key for store rows and FIT cache (ADR-0009)
         self.provider = IntervalsProvider(account, UrllibHttp(),
@@ -246,7 +248,7 @@ def _run_health(args) -> int:
 
 
 def _run_publish(args) -> int:
-    config = Config()
+    config = load_config(args.db)
     account = Account.from_env()
     provider = IntervalsProvider(account, UrllibHttp(), cache_dir=args.cache_dir / "activities")
     store = ResultStore(args.db)
@@ -340,7 +342,8 @@ def _run_calibrate(args) -> int:
         print(f"          run-mean refit {_fmt(hr.run_mean_value)}, "
               f"HR {hr.hr_coeff:+.2f} s/km per bpm, corr(HR, heat) {hr.hr_wbgt_corr:+.2f}")
         print(f"          R²={hr.r2:.2f} — optimistic, segments within a run correlate")
-    print("\nreport only — nothing applied (FR-8.2). Review before tuning config.")
+    print(f"\nreport only — nothing applied (FR-8.2). Review, then put the values you "
+          f"trust in\n{config_path(args.db)} (see pacelab.example.toml).")
     return 0
 
 
@@ -429,6 +432,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     _configure_logging(args.log_level)
+    try:
+        return _dispatch(args)
+    except ConfigError as e:
+        # One message, no traceback: a bad `pacelab.toml` is an operator's typo, and the
+        # container's logs are where they will read it. The message already names the file.
+        print(str(e), file=sys.stderr)
+        return 1
+
+
+def _dispatch(args) -> int:
     if args.command == "health":
         return _run_health(args)
     if args.command == "sync":

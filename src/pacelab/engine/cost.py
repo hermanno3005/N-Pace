@@ -8,10 +8,11 @@ from pacelab.models.heat import heat_penalty
 from pacelab.models.wind import wind_penalty
 from pacelab.weather.conditions import Conditions
 
-_DEFAULT = Config()
-
-
-def segment_cost(segment: Segment, conditions: Conditions, config: Config = _DEFAULT) -> CombinedCost:
+# No default `config` here, deliberately (ADR-0019). A module-level `Config()` is a
+# second, invisible source of coefficients that a `pacelab.toml` cannot reach — exactly the
+# silent fall-back to the author's numbers this loader exists to prevent. Callers pass the
+# configuration they loaded.
+def segment_cost(segment: Segment, conditions: Conditions, config: Config) -> CombinedCost:
     """The grade + heat + wind pace penalties for a segment, combined per ADR-0001/0005."""
     return combine(
         p_grade=grade_penalty(segment.grade, k_grade=config.k_grade),

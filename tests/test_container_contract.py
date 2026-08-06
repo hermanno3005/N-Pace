@@ -246,3 +246,18 @@ def test_every_action_is_pinned_to_a_commit_sha():
     assert uses
     for ref in uses:
         assert re.search(r"@[0-9a-f]{40}$", ref), f"{ref} is not pinned to a commit sha"
+
+
+def test_personal_configuration_arrives_through_the_existing_bind_mount():
+    # ADR-0019 picks "beside the results database" as the lookup location precisely so the
+    # container needs no new mount and compose.yaml needs no edit: the working directory
+    # *is* the bind-mounted corpus directory, so `pacelab.toml` dropped in the host's ./data
+    # is the file the loader reads.
+    from pacelab.config import CONFIG_FILENAME, config_path
+
+    workdir = re.findall(r"^WORKDIR\s+(\S+)\s*$", DOCKERFILE, re.MULTILINE)[-1]
+    target = COMPOSE["services"]["pacelab"]["volumes"][0].split(":")[1]
+    assert workdir == target, "the corpus mount is no longer the working directory"
+
+    # The default --db is relative, so it resolves under that working directory.
+    assert config_path(Path(workdir) / "pacelab.db") == Path(workdir) / CONFIG_FILENAME
