@@ -20,19 +20,19 @@ README = (ROOT / "README.md").read_text()
 CLI_SOURCE = (ROOT / "src" / "pacelab" / "cli.py").read_text()
 
 #: The corpus activity the README's sample annotation comes from: intervals.icu
-#: i160327026, 25 June 2026, 12.1 km at 30 °C — the run carrying the largest heat cost in
-#: the corpus among real runs (the only larger one is a 270 m fragment). Stored numbers,
-#: copied from `activities` so the assertion runs without the corpus, which is not in the
-#: repository. Segments are irrelevant to the annotation.
+#: i160139906, 24 June 2026, 11.2 km at 26 °C — deliberately an unremarkable run rather
+#: than the corpus's extremes, so the block on the front page is the one a reader will
+#: actually get. Stored numbers, copied from `activities` so the assertion runs without
+#: the corpus, which is not in the repository. Segments are irrelevant to the annotation.
 SAMPLE = ActivityResult(
-    observed_pace=347.472790176363,
-    np_pace=263.11529975792,
-    cost_grade=22.1453581871945,
-    cost_heat=57.4542666351395,
-    cost_wind=0.623971752397615,
-    distance_m=12119.1544525359,
+    observed_pace=333.285617642767,
+    np_pace=281.0498831324112,
+    cost_grade=0.6948060526435256,
+    cost_heat=51.32145811570605,
+    cost_wind=0.42889134145020186,
+    distance_m=11159.0,
     segments=[],
-    start_time=1782406280.0,
+    start_time=1782327452.0,
 )
 
 

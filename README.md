@@ -21,22 +21,22 @@ activity itself, where you already read it.
 
 ## What it looks like
 
-The **Annotation** PaceLab wrote onto the run carrying the largest heat **Pace Penalty** in
-the author's corpus — 12.1 km on 25 June 2026, at 30 °C (one 270 m fragment scores higher
-and is not a run):
+An ordinary summer evening run from the author's corpus — 11.2 km on 24 June 2026, at
+26 °C and 67% humidity — and the **Annotation** PaceLab wrote onto it:
 
 ```
-🏃 PaceLab · NP 4:23/km (ran 5:47/km)
-⛰️ grade +22 · 🌡️ heat +57 · 💨 wind +1 s/km (wind not in NP)
+🏃 PaceLab · NP 4:41/km (ran 5:33/km)
+⛰️ grade +1 · 🌡️ heat +51 · 💨 wind +0 s/km (wind not in NP)
 ```
 
-Nearly a minute and a half a kilometre of that observed pace was the conditions, and most
-of it was the heat. The three components are the **Environmental Cost**, reported in full;
-only grade and heat were removed to get the **Normalized Pace**, so the components are an
-attribution of the gap rather than a sum that closes on it exactly.
+Fifty-one seconds a kilometre of that observed pace was the heat, on a route flat enough
+and a day still enough that neither grade nor wind had anything to say. Three lines up the
+trend from an April run at the same effort, this one no longer looks like a bad week.
 
-That block is spliced into the activity's description and replaced in place on every
-republish — it never stacks, and it never touches your own text.
+The three components are the **Environmental Cost**, reported in full; only grade and heat
+form the **Applied Cost** that was removed to get the **Normalized Pace**. The block is
+spliced into the activity's description and replaced in place on every republish — it never
+stacks, and it never touches your own text.
 
 ## How it works
 
