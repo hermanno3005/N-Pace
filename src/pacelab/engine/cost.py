@@ -8,7 +8,7 @@ from pacelab.models.heat import heat_penalty
 from pacelab.models.wind import wind_penalty
 from pacelab.weather.conditions import Conditions
 
-# No default `config` here, deliberately (ADR-0019). A module-level `Config()` is a
+# No default `config` here, deliberately (ADR-0021). A module-level `Config()` is a
 # second, invisible source of coefficients that a `pacelab.toml` cannot reach — exactly the
 # silent fall-back to the author's numbers this loader exists to prevent. Callers pass the
 # configuration they loaded.

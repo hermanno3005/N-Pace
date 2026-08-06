@@ -249,7 +249,7 @@ def test_every_action_is_pinned_to_a_commit_sha():
 
 
 def test_personal_configuration_arrives_through_the_existing_bind_mount():
-    # ADR-0019 picks "beside the results database" as the lookup location precisely so the
+    # ADR-0021 picks "beside the results database" as the lookup location precisely so the
     # container needs no new mount and compose.yaml needs no edit: the working directory
     # *is* the bind-mounted corpus directory, so `pacelab.toml` dropped in the host's ./data
     # is the file the loader reads.

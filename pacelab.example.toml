@@ -1,4 +1,4 @@
-# PaceLab personal configuration (ADR-0019) — optional.
+# PaceLab personal configuration (ADR-0021) — optional.
 #
 # Copy this file to `pacelab.toml` in the directory that holds your results database
 # (`pacelab.db`), uncomment what you want to change, and delete the rest. In the container

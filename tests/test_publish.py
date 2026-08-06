@@ -5,7 +5,7 @@ from pacelab.publish.annotation import MARKER
 from pacelab.publish.publisher import publish_activity, publish_range
 from pacelab.store import ResultStore
 
-#: What the running engine stamps. Derived from the coefficients (ADR-0019), so a test that
+#: What the running engine stamps. Derived from the coefficients (ADR-0021), so a test that
 #: hands `publish_range` a `Config` has to stamp its rows from the same place.
 VERSION = Config().model_version
 

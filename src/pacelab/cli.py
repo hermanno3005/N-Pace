@@ -180,7 +180,7 @@ class _SyncContext:
             self.say(f"{status:14} {activity_id}")
         done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
         # The version is on this line and not on each activity's: a pass rewrites the
-        # corpus at exactly one model, and after ADR-0019 that model can come from an
+        # corpus at exactly one model, and after ADR-0021 that model can come from an
         # edited `pacelab.toml`. `docker logs` is then where a rewrite is traceable to the
         # coefficients that caused it.
         self.say(f"recomputed {done} / {len(outcomes)} drifted "
@@ -313,7 +313,7 @@ def _run_calibrate(args) -> int:
     # defaults: once calibration has moved a coefficient (wbgt_a, ADR-0006), an abstention
     # keeps the configured value, and that is the number worth printing. `load_config`
     # rather than `Config()` so "configured" reaches this installation's own `pacelab.toml`
-    # (ADR-0019), whose coefficients are both the baseline each fit is judged against and
+    # (ADR-0021), whose coefficients are both the baseline each fit is judged against and
     # the parameters of the fits themselves. Reading them here changes nothing on disk —
     # calibrate still applies nothing (FR-8.2).
     config = load_config(args.db)

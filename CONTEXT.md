@@ -100,7 +100,7 @@ _Avoid_: status, ping, liveness (it is a last-success probe, not a liveness one)
 
 **Model Version**:
 What produced a stored number, stamped on every row: a declared version bumped by hand for
-a pipeline change, plus a digest of the effective coefficients (ADR-0019) —
+a pipeline change, plus a digest of the effective coefficients (ADR-0021) —
 `0.2.1+<digest>`, or the bare `0.2.1` when every coefficient is its shipped default. Derived
 from the values, never declared by an installation, so editing `pacelab.toml` drifts the
 corpus by itself and the next **Recompute** reconciles it. The reference altitude is
@@ -200,7 +200,7 @@ model was fitted rather than of what it normalizes to, and therefore settable pe
 definition, frozen, and settable by nobody: `wbgt_ref_c` reads like one but is the heat
 curve's zero-point — the number one particular WBGT approximation returns at the frozen
 baseline — so it falls on the coefficient side, while `reference_temp_c` *is* the written
-definition and stays in code (ADR-0019 argues that line). The reference altitude is on
+definition and stays in code (ADR-0021 argues that line). The reference altitude is on
 neither side: settable, but a fact about where an athlete runs that fills a slot in the
 frozen definition, which is why **Model Version** covers the coefficients and not it.
 _Avoid_: parameter, constant, setting (each blurs the fitted/frozen line).
@@ -217,7 +217,7 @@ _Avoid_: instance, deployment, host, account (that's the storage unit).
 
 **Personal Configuration**:
 The optional `pacelab.toml` through which an **Installation** supplies its own
-**coefficients** and reference altitude (ADR-0019). Absent — the ordinary case, and a
+**coefficients** and reference altitude (ADR-0021). Absent — the ordinary case, and a
 fresh clone needs no file at all — the engine computes with its shipped values. Located
 beside the results database rather than in the process's working directory, so it belongs
 to the corpus and follows it into the container.

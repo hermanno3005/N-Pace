@@ -166,7 +166,7 @@ its shipped values, and `pacelab.example.toml` documents every key.
 
 Copy it to `pacelab.toml` **beside your results database** (in the container, that is
 `./data/pacelab.toml` on the host — compose needs no change). It carries two kinds of
-number (ADR-0019):
+number (ADR-0021):
 
 - **The seven coefficients** — `k_grade`, `wbgt_ref_c`, `wbgt_a`, `wbgt_b`, `heat_a`,
   `heat_b`, `drag_area_per_mass`. These shape the penalty curves and are properties of

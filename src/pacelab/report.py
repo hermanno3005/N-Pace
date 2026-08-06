@@ -32,7 +32,7 @@ def format_summary(activity_id: str, result: ActivityResult, model_version: str)
     """One activity's numbers, and what produced them.
 
     The version is on the block rather than left to the JSON export because it is now
-    derived from the coefficients (ADR-0019): a suffix is the only visible sign that these
+    derived from the coefficients (ADR-0021): a suffix is the only visible sign that these
     numbers came from a personal `pacelab.toml` rather than the shipped defaults.
     """
     lines = [

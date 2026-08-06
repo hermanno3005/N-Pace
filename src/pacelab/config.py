@@ -8,7 +8,7 @@ from the coefficients in force, so a re-tune cannot fail to reach the stamp.
 
 The values below are what PaceLab *ships*, fitted to one athlete's corpus in one location
 (``docs/research/calibration-findings-2026-07.md``). An installation supplies its own through
-an optional ``pacelab.toml`` beside its results database (ADR-0019) — see ``load_config``.
+an optional ``pacelab.toml`` beside its results database (ADR-0021) — see ``load_config``.
 """
 
 import hashlib
@@ -55,7 +55,7 @@ class Config:
     def model_version(self) -> str:
         """What produced these numbers: ``0.3.0``, or ``0.3.0+<digest>`` off the defaults.
 
-        A field would be a lie once coefficients are data (ADR-0019). Editing
+        A field would be a lie once coefficients are data (ADR-0021). Editing
         ``pacelab.toml`` changes every number the engine produces, so it has to change the
         stamp too — otherwise the corpus keeps calling itself current, ``Recompute``
         enumerates nothing, and history disagrees with itself invisibly.
@@ -84,7 +84,7 @@ DECLARED_VERSION = "0.3.0"
 
 CONFIG_FILENAME = "pacelab.toml"
 
-#: The reference altitude plus the seven model coefficients (ADR-0019). Everything else on
+#: The reference altitude plus the seven model coefficients (ADR-0021). Everything else on
 #: ``Config`` is deliberately not settable — see ``_UNSETTABLE_KEYS``.
 SETTABLE_KEYS = (
     "home_elevation_m",
@@ -100,7 +100,7 @@ SETTABLE_KEYS = (
 #: Settable but deliberately outside the version stamp: ``home_elevation_m`` is declared
 #: here and read nowhere in the engine — an inert slot documenting the altitude term of the
 #: Reference Conditions. A value that cannot change a stored number must not invalidate one.
-#: If a future model consumes it, it moves into the digest in that same commit (ADR-0019).
+#: If a future model consumes it, it moves into the digest in that same commit (ADR-0021).
 _UNVERSIONED_KEYS = ("home_elevation_m",)
 
 #: The seven coefficients whose values reach every number the engine stores, and therefore
@@ -109,7 +109,7 @@ _UNVERSIONED_KEYS = ("home_elevation_m",)
 VERSIONED_KEYS = tuple(k for k in SETTABLE_KEYS if k not in _UNVERSIONED_KEYS)
 
 #: Fields a reader could plausibly expect to set, each held back for a stated reason
-#: (ADR-0019). They get their own message: "unknown key" would be a lie, and the reason is
+#: (ADR-0021). They get their own message: "unknown key" would be a lie, and the reason is
 #: the part worth reading.
 _UNSETTABLE_KEYS = {
     "apply_wind": "wind in NP is a per-invocation reporting choice (ADR-0005); "
@@ -159,7 +159,7 @@ def config_path(db_path: Path | str) -> Path:
 
     Beside the database, not in the process working directory — which is what makes the
     lookup survive the container, whose working directory *is* the bind-mounted corpus
-    directory, so ``compose.yaml`` needs no change (ADR-0019).
+    directory, so ``compose.yaml`` needs no change (ADR-0021).
     """
     return Path(db_path).resolve().parent / CONFIG_FILENAME
 

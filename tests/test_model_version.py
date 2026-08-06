@@ -1,4 +1,4 @@
-"""The version stamp is derived from the coefficients that produced the numbers (ADR-0019).
+"""The version stamp is derived from the coefficients that produced the numbers (ADR-0021).
 
 Once coefficients are data, "the model changed" and "the version changed" stop being one
 act unless the values themselves reach the stamp. Every test here is either "a change that

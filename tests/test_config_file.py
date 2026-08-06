@@ -1,4 +1,4 @@
-"""Personal configuration loaded from the corpus directory (ADR-0019).
+"""Personal configuration loaded from the corpus directory (ADR-0021).
 
 The whole point of the file is that an installation's Normalized Pace is computed with its
 own coefficients rather than the author's, so every test here is either "the value reached
@@ -101,7 +101,7 @@ def test_apply_wind_is_a_flag_not_a_file_key(tmp_path):
 @pytest.mark.parametrize("key", ["apply_wind", "step_m", "reference_temp_c", "model_version"])
 def test_the_deliberately_unsettable_keys_are_rejected(tmp_path, key):
     # Each is a real field on Config, so accepting it would "work" — and quietly move a
-    # thing that ADR-0019 keeps out of an installation's hands.
+    # thing that ADR-0021 keeps out of an installation's hands.
     db = _write(tmp_path, f"{key} = 1\n")
 
     with pytest.raises(ConfigError) as e:
