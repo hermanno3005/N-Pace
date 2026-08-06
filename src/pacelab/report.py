@@ -28,9 +28,15 @@ def pace(sec_per_km: float) -> str:
     return f"{m}:{s:02d}"
 
 
-def format_summary(activity_id: str, result: ActivityResult) -> str:
+def format_summary(activity_id: str, result: ActivityResult, model_version: str) -> str:
+    """One activity's numbers, and what produced them.
+
+    The version is on the block rather than left to the JSON export because it is now
+    derived from the coefficients (ADR-0019): a suffix is the only visible sign that these
+    numbers came from a personal `pacelab.toml` rather than the shipped defaults.
+    """
     lines = [
-        f"PaceLab — {activity_id}",
+        f"PaceLab — {activity_id}   (model {model_version})",
         f"  Distance      : {result.distance_m / 1000:.2f} km",
         f"  Observed pace : {pace(result.observed_pace)}/km",
         f"  Normalized    : {pace(result.np_pace)}/km   (grade + heat removed)",

@@ -98,6 +98,15 @@ broken credentials without needing valid ones. **Unhealthy** is one clause read 
 successful tick within 3 × the recorded interval.
 _Avoid_: status, ping, liveness (it is a last-success probe, not a liveness one).
 
+**Model Version**:
+What produced a stored number, stamped on every row: a declared version bumped by hand for
+a pipeline change, plus a digest of the effective coefficients (ADR-0019) —
+`0.2.1+<digest>`, or the bare `0.2.1` when every coefficient is its shipped default. Derived
+from the values, never declared by an installation, so editing `pacelab.toml` drifts the
+corpus by itself and the next **Recompute** reconciles it. The reference altitude is
+excluded: it changes no stored number, so it must invalidate none.
+_Avoid_: schema version, release version (it versions the model's outputs, not the code).
+
 **Recompute**:
 The reconciliation pass over the stored corpus (ADR-0016): every row that disagrees with
 itself — stale `model_version`, still provisional, or never annotated — is re-analysed

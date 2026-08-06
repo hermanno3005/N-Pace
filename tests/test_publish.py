@@ -5,6 +5,10 @@ from pacelab.publish.annotation import MARKER
 from pacelab.publish.publisher import publish_activity, publish_range
 from pacelab.store import ResultStore
 
+#: What the running engine stamps. Derived from the coefficients (ADR-0019), so a test that
+#: hands `publish_range` a `Config` has to stamp its rows from the same place.
+VERSION = Config().model_version
+
 
 def result(np=277.0):
     return ActivityResult(observed_pace=304.0, np_pace=np, cost_grade=3.0, cost_heat=23.0,
@@ -47,14 +51,14 @@ def test_publish_activity_splices_and_marks(tmp_path):
 
 def test_publish_range_publishes_only_what_needs_it(tmp_path):
     store = ResultStore(tmp_path / "db")
-    store.save("i1", result(), model_version="0.2.0", account_id="acct")  # needs publish
-    store.save("i2", result(), model_version="0.2.0", account_id="acct")
-    store.mark_published("i2", "0.2.0", account_id="acct")  # already done
+    store.save("i1", result(), model_version=VERSION, account_id="acct")  # needs publish
+    store.save("i2", result(), model_version=VERSION, account_id="acct")
+    store.mark_published("i2", VERSION, account_id="acct")  # already done
     provider = StubDescriptions()
     provider.refs = [ActivityRef("i1", None, "Run", None), ActivityRef("i2", None, "Run", None),
                      ActivityRef("i9", None, "Run", None)]  # i9 was never analysed
 
-    outcomes = dict(publish_range(provider, store, Config(model_version="0.2.0"),
+    outcomes = dict(publish_range(provider, store, Config(),
                                   "2026-01-01", "2026-12-31", "acct"))
 
     assert outcomes == {"i1": "published", "i2": "skip", "i9": "not-analyzed"}
@@ -64,12 +68,12 @@ def test_publish_range_publishes_only_what_needs_it(tmp_path):
 def test_publish_failure_is_contained(tmp_path):
     # ADR-0011: publishing is best-effort — a target outage must not raise out.
     store = ResultStore(tmp_path / "db")
-    store.save("i1", result(), model_version="0.2.0", account_id="acct")
+    store.save("i1", result(), model_version=VERSION, account_id="acct")
     provider = StubDescriptions(fail=True)
     provider.refs = [ActivityRef("i1", None, "Run", None)]
 
-    outcomes = dict(publish_range(provider, store, Config(model_version="0.2.0"),
+    outcomes = dict(publish_range(provider, store, Config(),
                                   "2026-01-01", "2026-12-31", "acct"))
 
     assert outcomes == {"i1": "publish-failed"}
-    assert store.needs_publish("i1", "0.2.0", account_id="acct")  # retried next time
+    assert store.needs_publish("i1", VERSION, account_id="acct")  # retried next time

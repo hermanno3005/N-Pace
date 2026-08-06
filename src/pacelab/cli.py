@@ -83,7 +83,7 @@ def _emit(activity_id, result, config, args) -> None:
         (args.json_dir / f"{activity_id}.json").write_text(
             json.dumps(to_dict(activity_id, result, config.model_version), indent=2)
         )
-    print(format_summary(activity_id, result))
+    print(format_summary(activity_id, result, config.model_version))
     if args.segments:
         print(format_segments(result))
     print()
@@ -179,7 +179,12 @@ class _SyncContext:
         for activity_id, status in outcomes:
             self.say(f"{status:14} {activity_id}")
         done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
-        self.say(f"recomputed {done} / {len(outcomes)} drifted")
+        # The version is on this line and not on each activity's: a pass rewrites the
+        # corpus at exactly one model, and after ADR-0019 that model can come from an
+        # edited `pacelab.toml`. `docker logs` is then where a rewrite is traceable to the
+        # coefficients that caused it.
+        self.say(f"recomputed {done} / {len(outcomes)} drifted "
+                 f"at model {self.config.model_version}")
         self.end_block()
         return outcomes
 

@@ -15,6 +15,11 @@
 #
 # Every key is checked. A misspelling, a non-numeric value, or a key that is not on this
 # list fails loudly with the offending key named — it never falls back to a default.
+#
+# Changing a coefficient changes the model version stamped on every result (`0.2.1+<digest>`),
+# so the next `pacelab recompute` re-analyses and republishes your whole corpus — after
+# taking a snapshot of it. Restating a shipped value changes nothing, and `home_elevation_m`
+# is excluded from the stamp because no model reads it yet.
 
 # --- Reference Conditions ---------------------------------------------------------------
 # The altitude Normalized Pace is expressed at: your home elevation in metres, so running
