@@ -7,9 +7,8 @@ still conditions at the same effort.
 
 ## Why
 
-A run in July reads as lost fitness. Same route, same effort, ninety seconds a kilometre
-slower than April, and the trend line says you have been getting worse all summer. You
-have not; it was 30 °C.
+A run in July reads as lost fitness. Same route, same effort, well down on April, and the
+trend line says you have been getting worse all summer. You have not; it was 30 °C.
 
 Strava's grade-adjusted pace corrects the hills and ignores the weather entirely, so half
 the story is missing exactly when it matters most. **Normalized Pace** strips the
@@ -21,17 +20,22 @@ activity itself, where you already read it.
 
 ## What it looks like
 
-An ordinary summer evening run from the author's corpus — 11.2 km on 24 June 2026, at
-26 °C and 67% humidity — and the **Annotation** PaceLab wrote onto it:
+An ordinary evening run — 9.6 km on 5 August 2026, at 30 °C — and the **Annotation**
+PaceLab wrote onto it:
 
 ```
-🏃 PaceLab · NP 4:41/km (ran 5:33/km)
-⛰️ grade +1 · 🌡️ heat +51 · 💨 wind +0 s/km (wind not in NP)
+🏃 PaceLab · NP ~5:14/km (ran 5:26/km)
+⛰️ grade +2 · 🌡️ heat +9 · 💨 wind +0 s/km (wind not in NP)
 ```
 
-Fifty-one seconds a kilometre of that observed pace was the heat, on a route flat enough
-and a day still enough that neither grade nor wind had anything to say. Three lines up the
-trend from an April run at the same effort, this one no longer looks like a bad week.
+Twelve seconds a kilometre of that pace was the conditions, and most of it was the heat.
+Small on any one run — which is the point: it is the *same* correction applied to every
+run, so the trend it leaves behind is comparable across a season instead of tracking the
+weather.
+
+The `~` marks a **Provisional Analysis**: the run is newer than the reanalysis archive's
+publication lag, so it was computed from the forecast tier and will be recomputed against
+the pinned archive, and republished, once the archive catches up.
 
 The three components are the **Environmental Cost**, reported in full; only grade and heat
 form the **Applied Cost** that was removed to get the **Normalized Pace**. The block is

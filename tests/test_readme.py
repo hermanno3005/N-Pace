@@ -20,20 +20,23 @@ README = (ROOT / "README.md").read_text()
 CLI_SOURCE = (ROOT / "src" / "pacelab" / "cli.py").read_text()
 
 #: The corpus activity the README's sample annotation comes from: intervals.icu
-#: i160139906, 24 June 2026, 11.2 km at 26 °C — deliberately an unremarkable run rather
+#: i172861541, 5 August 2026, 9.6 km at 30 °C — deliberately an unremarkable run rather
 #: than the corpus's extremes, so the block on the front page is the one a reader will
 #: actually get. Stored numbers, copied from `activities` so the assertion runs without
 #: the corpus, which is not in the repository. Segments are irrelevant to the annotation.
 SAMPLE = ActivityResult(
-    observed_pace=333.285617642767,
-    np_pace=281.0498831324112,
-    cost_grade=0.6948060526435256,
-    cost_heat=51.32145811570605,
-    cost_wind=0.42889134145020186,
-    distance_m=11159.0,
+    observed_pace=326.32018125568,
+    np_pace=314.3741048473,
+    cost_grade=2.42740480843857,
+    cost_heat=9.44741471273196,
+    cost_wind=-0.258747636403162,
+    distance_m=9591.80639075328,
     segments=[],
-    start_time=1782327452.0,
+    start_time=1785953902.0,
 )
+
+#: The run was still provisional when the block was taken, so the README shows the tilde.
+SAMPLE_PROVISIONAL = True
 
 
 def _annotation_in_readme(height: int) -> str:
@@ -59,7 +62,7 @@ def test_titled_pacelab():
 def test_sample_annotation_is_what_the_renderer_produces():
     # Not hand-written, and not allowed to drift: an annotation format change has to reach
     # the README in the same commit, or this fails.
-    block = render_annotation(SAMPLE)
+    block = render_annotation(SAMPLE, provisional=SAMPLE_PROVISIONAL)
     assert _annotation_in_readme(len(block.splitlines())) == block
 
 
