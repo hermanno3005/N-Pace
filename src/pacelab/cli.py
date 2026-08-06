@@ -308,10 +308,14 @@ def _run_calibrate(args) -> int:
     from pacelab.calibrate import (
         fit_hr_conditioned_wbgt_a, fit_k_grade, fit_wbgt_a, is_steady,
     )
+
     # Compare fits against what is *configured*, not against the ported population
     # defaults: once calibration has moved a coefficient (wbgt_a, ADR-0006), an abstention
-    # keeps the configured value, and that is the number worth printing.
-    config = Config()
+    # keeps the configured value, and that is the number worth printing. `load_config`
+    # rather than `Config()` so "configured" means this installation's `pacelab.toml`
+    # (ADR-0019) and not merely what PaceLab ships. Reading it here changes nothing on
+    # disk: calibrate still applies nothing (FR-8.2).
+    config = load_config(args.db)
     account_id = Account.from_env().storage_id
     store = ResultStore(args.db)
     results = [r for r in (store.load(p.activity_id, account_id=account_id)
@@ -327,7 +331,12 @@ def _run_calibrate(args) -> int:
         print(f"k_grade : {k.value:.3f}   (configured {config.k_grade}; "
               f"IQR {k.spread:.3f} over {k.n_runs} hilly steady runs)")
 
+    # Where the grade fit abstains the heat fits de-trend with the *configured* k_grade:
+    # a flat corpus is exactly the one that cannot fit its own k and whose owner is
+    # therefore most likely to have typed one in, and de-trending with the shipped default
+    # instead would bias the wbgt_a they are about to copy into pacelab.toml.
     k_grade = k.value if k else config.k_grade
+
     a = fit_wbgt_a(results, k_grade=k_grade)
     if a is None:
         print(f"wbgt_a  : insufficient data/spread — keeping configured {config.wbgt_a}")
