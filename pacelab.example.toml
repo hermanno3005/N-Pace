@@ -16,7 +16,7 @@
 # Every key is checked. A misspelling, a non-numeric value, or a key that is not on this
 # list fails loudly with the offending key named — it never falls back to a default.
 #
-# Changing a coefficient changes the model version stamped on every result (`0.2.1+<digest>`),
+# Changing a coefficient changes the model version stamped on every result (`0.3.0+<digest>`),
 # so the next `pacelab recompute` re-analyses and republishes your whole corpus — after
 # taking a snapshot of it. Restating a shipped value changes nothing, and `home_elevation_m`
 # is excluded from the stamp because no model reads it yet.
@@ -36,8 +36,9 @@
 # The curve's zero point in °C WBGT — the WBGT at Reference Conditions, below which no heat
 # penalty is applied. Move it with the curve if you re-fit.
 # wbgt_ref_c = 7.2
-# Scale of the heat penalty above that zero. This is the number `pacelab calibrate` fits.
-# wbgt_a = 0.0007
+# Scale of the heat penalty above that zero. This is the number `pacelab calibrate` fits,
+# and the first one calibration has moved off its ported population default (ADR-0006).
+# wbgt_a = 0.0001
 # Curvature of the heat penalty. El Helou's fit is explicitly quadratic.
 # wbgt_b = 2.0
 

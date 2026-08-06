@@ -10,7 +10,7 @@ import re
 
 import pytest
 from test_recompute import (
-    ACCOUNT, ArchiveService, StubProvider, _Recording, _stub_result, _write_gpx,
+    ACCOUNT, ArchiveService, StubProvider, _stub_result, _watch_writes, _write_gpx,
 )
 
 from pacelab.account import Account
@@ -40,7 +40,7 @@ def _write(tmp_path, body: str):
 
 
 def test_the_shipped_defaults_are_the_bare_declared_version(tmp_path):
-    # Load-bearing, not tidy: the author's corpus is stamped `0.2.1`, and a scheme that
+    # Load-bearing, not tidy: the author's corpus is stamped `0.3.0`, and a scheme that
     # suffixed the default version would mark all 55 rows drifted the day this shipped.
     assert Config().model_version == DECLARED_VERSION
     assert load_config(tmp_path / "pacelab.db").model_version == DECLARED_VERSION
@@ -61,10 +61,10 @@ def test_re_tuning_a_shipped_default_must_bump_the_declared_version():
     # are here because a value below no longer matches, bump DECLARED_VERSION in the same
     # commit, then update these.
     assert (Config().k_grade, Config().wbgt_ref_c, Config().wbgt_a, Config().wbgt_b) == \
-        (0.40, 7.2, 0.0007, 2.0)
+        (0.40, 7.2, 0.0001, 2.0)
     assert (Config().heat_a, Config().heat_b, Config().drag_area_per_mass) == \
         (0.0018, 1.5, 0.0057)
-    assert DECLARED_VERSION == "0.2.1"
+    assert DECLARED_VERSION == "0.3.0"
 
 
 @pytest.mark.parametrize("key,value", sorted(RETUNED.items()))
@@ -123,8 +123,8 @@ def test_the_suffix_is_short_and_the_same_across_processes(tmp_path):
     body = "\n".join(f"{key} = {value!r}" for key, value in sorted(RETUNED.items()))
     version = load_config(_write(tmp_path, body)).model_version
 
-    assert re.fullmatch(r"0\.2\.1\+[0-9a-f]{8}", version)
-    assert version == "0.2.1+cdab924d"
+    assert re.fullmatch(r"0\.3\.0\+[0-9a-f]{8}", version)
+    assert version == "0.3.0+cdab924d"
 
 
 def test_an_integer_and_its_float_stamp_alike(tmp_path):
@@ -161,13 +161,15 @@ def test_a_re_tune_snapshots_before_the_first_row_is_rewritten(tmp_path):
     # ADR-0018's guard covers the coefficient case for free — a re-tune is a version bump
     # like any other, so a bad one is recoverable by the path that already exists.
     provider, store, config = _retuned_corpus(tmp_path)
-    events = []
-    provider.downloaded = _Recording(events, "download")
+    # Ordered against the first *write*, which is what #37 established the guard covers:
+    # the pass downloads and analyses before it knows whether the row can be rewritten.
+    events = _watch_writes(store)
 
     recompute(provider, ArchiveService(), store, config, ACCOUNT,
               before_rewrite=lambda: events.append("snapshot"))
 
     assert events[0] == "snapshot"
+    assert "save" in events  # the pass really did rewrite, so the ordering means something
 
 
 def test_editing_the_reference_altitude_recomputes_nothing(tmp_path):
