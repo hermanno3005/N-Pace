@@ -122,24 +122,28 @@ land under the working directory.
 
 ## Setup — container
 
-The intended home is a Raspberry Pi, running unattended (ADR-0013):
+The intended home is a Raspberry Pi, running unattended (ADR-0013). Nothing is built there
+— `compose.yaml` pulls the image CI publishes:
 
 ```sh
-git clone https://github.com/hermanno3005/pacelab.git ~/docker/pacelab
-cd ~/docker/pacelab
-cp .env.example .env         # the same credentials
-docker compose up -d --build
+mkdir -p ~/docker/pacelab && cd ~/docker/pacelab
+# copy compose.yaml here, and write .env with the two credentials (mode 600)
+docker compose up -d
 docker compose logs -f
 ```
 
-`compose.yaml` builds from the checkout (`build: .`), so the whole repository has to be
-there — a lone `compose.yaml` has no `Dockerfile` to build. CI also publishes an arm64
-image to `ghcr.io/hermanno3005/pacelab`, tagged `:latest` and `:<sha>` and only ever from a
-green test run; pointing compose at it instead of building is a one-line `image:` change.
+The image is `ghcr.io/hermanno3005/pacelab:latest` — arm64, public (so the pull needs no
+credentials), and published only from a green test run on `main`. A `:<sha>` tag is
+published alongside it, which is what makes "what is running?" and "roll back to that one"
+answerable. `deploy/pacelab-update.sh` follows `:latest` from cron, so the Pi picks up a
+new image within the hour without anyone logging in (ADR-0019). The full layout, the
+crontab line, and what to look at when it misbehaves are in `docs/runbooks/pi-deployment.md`.
 
-- **The corpus lands in `./data`** beside `compose.yaml` on the host — bind-mounted at
+- **The corpus lands in `data/`** beside `compose.yaml` on the host — bind-mounted at
   `/data`, so `pacelab.db`, the pinned weather cache, and the snapshots stay ordinary files
-  that `sqlite3` and `scp` can reach without going through Docker (ADR-0015).
+  that `sqlite3` and `scp` can reach without going through Docker (ADR-0015). The mount is
+  an absolute path, because the update timer runs from cron and cron has no working
+  directory worth relying on.
 - **Poll cadence is 15 minutes** by default, over a rolling 14-day window, so an
   annotation appears within minutes of an upload and provisional analyses finalize as the
   weather archive catches up. `pacelab watch --interval` and `--window-days` change them.
@@ -165,7 +169,7 @@ Optional. A fresh clone needs no file at all: with none present the engine compu
 its shipped values, and `pacelab.example.toml` documents every key.
 
 Copy it to `pacelab.toml` **beside your results database** (in the container, that is
-`./data/pacelab.toml` on the host — compose needs no change). It carries two kinds of
+`data/pacelab.toml` on the host — compose needs no change). It carries two kinds of
 number (ADR-0021):
 
 - **The seven coefficients** — `k_grade`, `wbgt_ref_c`, `wbgt_a`, `wbgt_b`, `heat_a`,
@@ -178,10 +182,12 @@ Every key is checked: a misspelling or a non-numeric value fails loudly with the
 named, and never falls back silently.
 
 > **The shipped coefficients were fitted to one athlete's corpus**, in one location, over
-> one summer (`docs/research/calibration-findings-2026-07.md`). They are a starting point,
-> not a calibration of you. `pacelab calibrate` fits `k_grade` and `wbgt_a` against your
-> own runs and prints them next to what you are currently using; this file is where the
-> ones you trust go.
+> one summer (`docs/research/calibration-findings-2026-07.md`). `wbgt_a` — the scale of
+> the whole heat penalty, and the term this project exists for — is no longer a population
+> default at all: it is that athlete's fitted number. It is a starting point, not a
+> calibration of you, and it is the one most worth replacing. `pacelab calibrate` fits
+> `k_grade` and `wbgt_a` against your own runs and prints them next to what you are
+> currently using; this file is where the ones you trust go.
 
 **Changing a coefficient drifts your whole corpus.** The model version stamped on every
 stored result is *derived* from the coefficients in force, so the moment you edit the file
@@ -205,8 +211,10 @@ season. What that does and does not mean:
 - **Adjusted Pace is not built.** The forward direction — projecting a goal pace *into*
   a forecast to get splits — is the inverse transform, and the engine's round-trip
   identity is already tested. The command is not there yet.
-- **The heat curve is the least settled part of the model.** It is the one that most
-  wants your own `pacelab calibrate` numbers.
+- **The heat curve is calibrated to one athlete, and only just.** `wbgt_a` has been fitted
+  once, against one season (ADR-0006/ADR-0014), which moved it a long way off the ported
+  population default. That is the model's least settled number and the one that most wants
+  replacing with your own.
 
 ## Development
 
@@ -226,7 +234,7 @@ that workflow.
 | `CONTEXT.md` | The domain language — every capitalised term above (Normalized Pace, Pace Penalty, Annotation, Recompute…) is defined there, along with the words this project deliberately avoids. |
 | `docs/adr/` | Why each decision went the way it did — the reference-conditions freeze, the WBGT model, wind's exclusion, the recompute contract. |
 | `SRS_AdjustedPace.md` | The requirements the whole thing answers to. |
-| `docs/runbooks/` | Operating it: pulling a snapshot off the Pi, restoring one. |
+| `docs/runbooks/` | Operating it: the Pi's layout and everyday commands (`pi-deployment.md`), pulling a snapshot off it and restoring one (`corpus-snapshots.md`). |
 | `docs/research/` | The reading behind the models, and the calibration findings. |
 | `CLAUDE.md` | How agents are expected to work in this repository. |
 
