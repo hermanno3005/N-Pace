@@ -116,7 +116,7 @@ Single technical user (Python-literate, data-comfortable). No GUI required; tabu
 
 ### 3.8 Personal Calibration — `FR-8` (Phase 2)
 - **FR-8.1** Using activities with HR, model the athlete's pace-at-given-effort and regress residuals against grade, heat-stress, and headwind to estimate **personal coefficients**, replacing population defaults.
-- **FR-8.2** MUST report fit quality (R², residual spread) and never silently overfit on sparse data; fall back to population defaults when data is insufficient.
+- **FR-8.2** MUST report fit quality (R², residual spread) and never silently overfit on sparse data; fall back to the coefficients in force when data is insufficient — the installation's own where `pacelab.toml` supplies them, the population defaults otherwise (ADR-0019).
 - **FR-8.3** Calibration is reproducible and versioned (store the coefficient set + the data window it was fit on).
 
 ### 3.9 Output, Storage & Reporting — `FR-9`

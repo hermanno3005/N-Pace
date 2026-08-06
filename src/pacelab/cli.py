@@ -312,9 +312,10 @@ def _run_calibrate(args) -> int:
     # Compare fits against what is *configured*, not against the ported population
     # defaults: once calibration has moved a coefficient (wbgt_a, ADR-0006), an abstention
     # keeps the configured value, and that is the number worth printing. `load_config`
-    # rather than `Config()` so "configured" means this installation's `pacelab.toml`
-    # (ADR-0019) and not merely what PaceLab ships. Reading it here changes nothing on
-    # disk: calibrate still applies nothing (FR-8.2).
+    # rather than `Config()` so "configured" reaches this installation's own `pacelab.toml`
+    # (ADR-0019), whose coefficients are both the baseline each fit is judged against and
+    # the parameters of the fits themselves. Reading them here changes nothing on disk —
+    # calibrate still applies nothing (FR-8.2).
     config = load_config(args.db)
     account_id = Account.from_env().storage_id
     store = ResultStore(args.db)
@@ -334,10 +335,13 @@ def _run_calibrate(args) -> int:
     # Where the grade fit abstains the heat fits de-trend with the *configured* k_grade:
     # a flat corpus is exactly the one that cannot fit its own k and whose owner is
     # therefore most likely to have typed one in, and de-trending with the shipped default
-    # instead would bias the wbgt_a they are about to copy into pacelab.toml.
+    # instead would bias the wbgt_a they are about to copy into pacelab.toml. The heat
+    # curve is centred on the configured reference for the same reason — wbgt_ref_c is
+    # settable, and a fit reported against a centre the engine does not use is not the
+    # athlete's coefficient.
     k_grade = k.value if k else config.k_grade
 
-    a = fit_wbgt_a(results, k_grade=k_grade)
+    a = fit_wbgt_a(results, k_grade=k_grade, wbgt_ref=config.wbgt_ref_c)
     if a is None:
         print(f"wbgt_a  : insufficient data/spread — keeping configured {config.wbgt_a}")
     else:
@@ -346,7 +350,7 @@ def _run_calibrate(args) -> int:
 
     # The HR-conditioned cut (ADR-0014): pace at equal HR, hot vs cool. Intent-proof, so
     # it is the one the findings doc treats as decisive.
-    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k_grade)
+    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k_grade, wbgt_ref=config.wbgt_ref_c)
     if hr is None:
         print("wbgt_a  : (at equal HR) insufficient data/spread, or HR and heat too "
               "collinear to separate")
