@@ -27,7 +27,7 @@ from pathlib import Path
 
 from pacelab.account import Account
 from pacelab.app import analyze_file
-from pacelab.config import Config
+from pacelab.config import ConfigError, config_path, load_config
 from pacelab.health import format_health, is_healthy
 from pacelab.providers.http import UrllibHttp
 from pacelab.providers.intervals import IntervalsProvider, RateLimited
@@ -83,7 +83,7 @@ def _emit(activity_id, result, config, args) -> None:
         (args.json_dir / f"{activity_id}.json").write_text(
             json.dumps(to_dict(activity_id, result, config.model_version), indent=2)
         )
-    print(format_summary(activity_id, result))
+    print(format_summary(activity_id, result, config.model_version))
     if args.segments:
         print(format_segments(result))
     print()
@@ -91,11 +91,13 @@ def _emit(activity_id, result, config, args) -> None:
 
 def _run_analyze(args) -> int:
     path = args.path
+    # Configuration first: a typo in `pacelab.toml` invalidates the run whatever is on the
+    # path, and reporting "no activities found" instead would hide it.
+    config = load_config(args.db, apply_wind=args.apply_wind)
     files = sorted(p for p in path.iterdir() if p.suffix.lower() in _SUFFIXES) if path.is_dir() else [path]
     if not files:
         print(f"No FIT/GPX activities found at {path}", file=sys.stderr)
         return 1
-    config = Config(apply_wind=args.apply_wind)
     store = ResultStore(args.db)
     service = _weather(args.cache_dir)
     for f in files:
@@ -119,7 +121,7 @@ class _SyncContext:
     def __init__(self, args, logged: bool = False):
         self.args = args
         self.logged = logged
-        self.config = Config(apply_wind=args.apply_wind)
+        self.config = load_config(args.db, apply_wind=args.apply_wind)
         account = Account.from_env()
         self.account_id = account.storage_id  # one key for store rows and FIT cache (ADR-0009)
         self.provider = IntervalsProvider(account, UrllibHttp(),
@@ -177,7 +179,12 @@ class _SyncContext:
         for activity_id, status in outcomes:
             self.say(f"{status:14} {activity_id}")
         done = sum(1 for _, s in outcomes if s in ("ok", "finalized"))
-        self.say(f"recomputed {done} / {len(outcomes)} drifted")
+        # The version is on this line and not on each activity's: a pass rewrites the
+        # corpus at exactly one model, and after ADR-0021 that model can come from an
+        # edited `pacelab.toml`. `docker logs` is then where a rewrite is traceable to the
+        # coefficients that caused it.
+        self.say(f"recomputed {done} / {len(outcomes)} drifted "
+                 f"at model {self.config.model_version}")
         self.end_block()
         return outcomes
 
@@ -246,7 +253,7 @@ def _run_health(args) -> int:
 
 
 def _run_publish(args) -> int:
-    config = Config()
+    config = load_config(args.db)
     account = Account.from_env()
     provider = IntervalsProvider(account, UrllibHttp(), cache_dir=args.cache_dir / "activities")
     store = ResultStore(args.db)
@@ -301,10 +308,15 @@ def _run_calibrate(args) -> int:
     from pacelab.calibrate import (
         fit_hr_conditioned_wbgt_a, fit_k_grade, fit_wbgt_a, is_steady,
     )
+
     # Compare fits against what is *configured*, not against the ported population
     # defaults: once calibration has moved a coefficient (wbgt_a, ADR-0006), an abstention
-    # keeps the configured value, and that is the number worth printing.
-    config = Config()
+    # keeps the configured value, and that is the number worth printing. `load_config`
+    # rather than `Config()` so "configured" reaches this installation's own `pacelab.toml`
+    # (ADR-0021), whose coefficients are both the baseline each fit is judged against and
+    # the parameters of the fits themselves. Reading them here changes nothing on disk —
+    # calibrate still applies nothing (FR-8.2).
+    config = load_config(args.db)
     account_id = Account.from_env().storage_id
     store = ResultStore(args.db)
     results = [r for r in (store.load(p.activity_id, account_id=account_id)
@@ -320,8 +332,16 @@ def _run_calibrate(args) -> int:
         print(f"k_grade : {k.value:.3f}   (configured {config.k_grade}; "
               f"IQR {k.spread:.3f} over {k.n_runs} hilly steady runs)")
 
+    # Where the grade fit abstains the heat fits de-trend with the *configured* k_grade:
+    # a flat corpus is exactly the one that cannot fit its own k and whose owner is
+    # therefore most likely to have typed one in, and de-trending with the shipped default
+    # instead would bias the wbgt_a they are about to copy into pacelab.toml. The heat
+    # curve is centred on the configured reference for the same reason — wbgt_ref_c is
+    # settable, and a fit reported against a centre the engine does not use is not the
+    # athlete's coefficient.
     k_grade = k.value if k else config.k_grade
-    a = fit_wbgt_a(results, k_grade=k_grade)
+
+    a = fit_wbgt_a(results, k_grade=k_grade, wbgt_ref=config.wbgt_ref_c)
     if a is None:
         print(f"wbgt_a  : insufficient data/spread — keeping configured {config.wbgt_a}")
     else:
@@ -330,7 +350,7 @@ def _run_calibrate(args) -> int:
 
     # The HR-conditioned cut (ADR-0014): pace at equal HR, hot vs cool. Intent-proof, so
     # it is the one the findings doc treats as decisive.
-    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k_grade)
+    hr = fit_hr_conditioned_wbgt_a(results, k_grade=k_grade, wbgt_ref=config.wbgt_ref_c)
     if hr is None:
         print("wbgt_a  : (at equal HR) insufficient data/spread, or HR and heat too "
               "collinear to separate")
@@ -340,7 +360,8 @@ def _run_calibrate(args) -> int:
         print(f"          run-mean refit {_fmt(hr.run_mean_value)}, "
               f"HR {hr.hr_coeff:+.2f} s/km per bpm, corr(HR, heat) {hr.hr_wbgt_corr:+.2f}")
         print(f"          R²={hr.r2:.2f} — optimistic, segments within a run correlate")
-    print("\nreport only — nothing applied (FR-8.2). Review before tuning config.")
+    print(f"\nreport only — nothing applied (FR-8.2). Review, then put the values you "
+          f"trust in\n{config_path(args.db)} (see pacelab.example.toml).")
     return 0
 
 
@@ -429,6 +450,16 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     _configure_logging(args.log_level)
+    try:
+        return _dispatch(args)
+    except ConfigError as e:
+        # One message, no traceback: a bad `pacelab.toml` is an operator's typo, and the
+        # container's logs are where they will read it. The message already names the file.
+        print(str(e), file=sys.stderr)
+        return 1
+
+
+def _dispatch(args) -> int:
     if args.command == "health":
         return _run_health(args)
     if args.command == "sync":

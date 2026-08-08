@@ -98,6 +98,15 @@ broken credentials without needing valid ones. **Unhealthy** is one clause read 
 successful tick within 3 × the recorded interval.
 _Avoid_: status, ping, liveness (it is a last-success probe, not a liveness one).
 
+**Model Version**:
+What produced a stored number, stamped on every row: a declared version bumped by hand for
+a pipeline change, plus a digest of the effective coefficients (ADR-0021) —
+`0.2.1+<digest>`, or the bare `0.2.1` when every coefficient is its shipped default. Derived
+from the values, never declared by an installation, so editing `pacelab.toml` drifts the
+corpus by itself and the next **Recompute** reconciles it. The reference altitude is
+excluded: it changes no stored number, so it must invalidate none.
+_Avoid_: schema version, release version (it versions the model's outputs, not the code).
+
 **Recompute**:
 The reconciliation pass over the stored corpus (ADR-0016): every row that disagrees with
 itself — stale `model_version`, still provisional, or never annotated — is re-analysed
@@ -182,3 +191,34 @@ The frozen baseline NP normalizes to, at which every pace penalty is zero by def
 **0% grade, 10 °C, 50% RH, no wind, no sun, home altitude**. Chosen so NP reads as
 "equivalent ideal cool-weather pace." Frozen — see ADR-0002 (no-sun added in v0.2 for WBGT).
 _Avoid_: ideal conditions, baseline (unqualified).
+
+**Coefficient**:
+One of the seven numbers that shape a **pace penalty** curve — `k_grade`, `wbgt_ref_c`,
+`wbgt_a`, `wbgt_b`, `heat_a`, `heat_b`, `drag_area_per_mass` — each a property of how the
+model was fitted rather than of what it normalizes to, and therefore settable per
+**Installation**. Distinct from a *term* of the **Reference Conditions**, which is a
+definition, frozen, and settable by nobody: `wbgt_ref_c` reads like one but is the heat
+curve's zero-point — the number one particular WBGT approximation returns at the frozen
+baseline — so it falls on the coefficient side, while `reference_temp_c` *is* the written
+definition and stays in code (ADR-0021 argues that line). The reference altitude is on
+neither side: settable, but a fact about where an athlete runs that fills a slot in the
+frozen definition, which is why **Model Version** covers the coefficients and not it.
+_Avoid_: parameter, constant, setting (each blurs the fitted/frozen line).
+
+### Configuration
+
+**Installation**:
+One running copy of PaceLab against one corpus — the unit a **Personal Configuration** is
+scoped to, and what "an installation that re-fits its heat curve" names. Distinct from
+**Account**, which scopes *storage*: one installation may in principle hold several
+accounts, and its **coefficients** belong to the installation rather than to any athlete in
+it.
+_Avoid_: instance, deployment, host, account (that's the storage unit).
+
+**Personal Configuration**:
+The optional `pacelab.toml` through which an **Installation** supplies its own
+**coefficients** and reference altitude (ADR-0021). Absent — the ordinary case, and a
+fresh clone needs no file at all — the engine computes with its shipped values. Located
+beside the results database rather than in the process's working directory, so it belongs
+to the corpus and follows it into the container.
+_Avoid_: settings, preferences, config (bare), profile.

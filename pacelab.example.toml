@@ -1,0 +1,53 @@
+# PaceLab personal configuration (ADR-0021) — optional.
+#
+# Copy this file to `pacelab.toml` in the directory that holds your results database
+# (`pacelab.db`), uncomment what you want to change, and delete the rest. In the container
+# that directory is the bind mount, so `./data/pacelab.toml` on the host is enough and
+# compose needs no change.
+#
+# With no file present, every value below is what the engine already uses, so a fresh clone
+# needs no configuration at all.
+#
+# THE SHIPPED VALUES ARE NOT YOURS. The seven coefficients were fitted to one athlete's
+# corpus, recorded at one location, in one summer — see
+# docs/research/calibration-findings-2026-07.md. `pacelab calibrate` fits `k_grade` and
+# `wbgt_a` against your own runs and reports them; this file is where they go.
+#
+# Every key is checked. A misspelling, a non-numeric value, or a key that is not on this
+# list fails loudly with the offending key named — it never falls back to a default.
+#
+# Changing a coefficient changes the model version stamped on every result (`0.3.0+<digest>`),
+# so the next `pacelab recompute` re-analyses and republishes your whole corpus — after
+# taking a snapshot of it. Restating a shipped value changes nothing, and `home_elevation_m`
+# is excluded from the stamp because no model reads it yet.
+
+# --- Reference Conditions ---------------------------------------------------------------
+# The altitude Normalized Pace is expressed at: your home elevation in metres (ADR-0002).
+# A fact about where you run, not a tunable. No model reads it yet — it documents the
+# altitude term of the Reference Conditions, and setting it changes no number today. That
+# is why it stays out of the version stamp: it cannot drift the corpus.
+# home_elevation_m = 535.0
+
+# --- Grade (ADR-0007) -------------------------------------------------------------------
+# Grade sensitivity: the damping applied to the mechanical cost of a slope. Higher means
+# hills are treated as costing more, so a hilly run normalizes faster.
+# k_grade = 0.40
+
+# --- Heat, WBGT curve (ADR-0010, the primary path) --------------------------------------
+# The curve's zero point in °C WBGT — the WBGT at Reference Conditions, below which no heat
+# penalty is applied. Move it with the curve if you re-fit.
+# wbgt_ref_c = 7.2
+# Scale of the heat penalty above that zero. This is the number `pacelab calibrate` fits,
+# and the first one calibration has moved off its ported population default (ADR-0006).
+# wbgt_a = 0.0001
+# Curvature of the heat penalty. El Helou's fit is explicitly quadratic.
+# wbgt_b = 2.0
+
+# --- Heat, Heat Index curve (the fallback when solar data is unavailable) ---------------
+# heat_a = 0.0018
+# heat_b = 1.5
+
+# --- Wind -------------------------------------------------------------------------------
+# Effective drag area per unit body mass, m²/kg. Reported by default and not applied to NP
+# (ADR-0005); `--apply-wind` is a per-run flag and deliberately not settable here.
+# drag_area_per_mass = 0.0057

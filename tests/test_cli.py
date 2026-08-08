@@ -7,7 +7,7 @@ import pytest
 
 from pacelab.analyze import ActivityResult, SegmentResult
 from pacelab.cli import main
-from pacelab.config import Config
+from pacelab.config import CONFIG_FILENAME, Config
 from pacelab.store import ResultStore
 
 ACCOUNT = "intervals-i399426"
@@ -56,7 +56,7 @@ def test_calibrate_states_the_single_version_quietly(tmp_path, capsys):
     assert "MIXED" not in out
 
 
-def test_calibrate_compares_fits_against_the_configured_coefficient(tmp_path, capsys):
+def test_calibrate_compares_fits_against_the_shipped_coefficient(tmp_path, capsys):
     # Once calibration has moved a coefficient off its ported default, "keeping default
     # 0.0007" is a lie: an abstention keeps whatever config carries, which is now 0.0001.
     db = tmp_path / "pacelab.db"
@@ -67,6 +67,95 @@ def test_calibrate_compares_fits_against_the_configured_coefficient(tmp_path, ca
     out = capsys.readouterr().out
     assert str(Config().wbgt_a) in out
     assert "0.0007" not in out
+
+
+def _configured(tmp_path, body):
+    """A corpus of one run — too short for any fit to converge — beside a pacelab.toml."""
+    db = tmp_path / "pacelab.db"
+    (tmp_path / CONFIG_FILENAME).write_text(body)
+    ResultStore(db).save("i1", _result(1.0), Config().model_version, account_id=ACCOUNT)
+    return db
+
+
+def test_calibrate_reports_the_abstained_fits_against_the_configured_coefficients(
+    tmp_path, capsys
+):
+    # The baseline a fit is judged against has to be what the engine is using, not what
+    # PaceLab ships — otherwise the report tells an installation that has tuned itself
+    # that its own numbers are somebody else's.
+    db = _configured(tmp_path, "k_grade = 0.35\nwbgt_a = 0.0009\n")
+
+    assert main(["calibrate", "--db", str(db)]) == 0
+
+    out = capsys.readouterr().out
+    assert "configured 0.35" in out
+    assert "configured 0.0009" in out
+    assert "default" not in out
+
+
+def test_calibrate_reports_a_converged_fit_against_the_configured_coefficients(
+    tmp_path, capsys, monkeypatch
+):
+    # The same criterion on the branch the operator actually reads: a fit that *did*
+    # converge, printed beside the baseline it is to be judged against. Separate from the
+    # abstain case above because these are two different f-strings, and a regression that
+    # reverted only this one would otherwise pass.
+    from pacelab.calibrate import Fit
+
+    db = _configured(tmp_path, "k_grade = 0.35\nwbgt_a = 0.0009\n")
+    monkeypatch.setattr("pacelab.calibrate.fit_k_grade",
+                        lambda results: Fit(value=0.41, n_runs=7, spread=0.06))
+    monkeypatch.setattr("pacelab.calibrate.fit_wbgt_a",
+                        lambda results, k_grade, wbgt_ref: Fit(value=0.00123, n_runs=9,
+                                                               spread=4.2, r2=0.31))
+
+    assert main(["calibrate", "--db", str(db)]) == 0
+
+    out = capsys.readouterr().out
+    assert "k_grade : 0.410   (configured 0.35;" in out
+    assert "wbgt_a  : 0.00123 (configured 0.0009;" in out
+    assert "default" not in out
+
+
+def test_calibrate_detrends_heat_with_the_configured_k_when_the_grade_fit_abstains(
+    tmp_path, monkeypatch
+):
+    # The silent one: on a corpus too flat to fit k_grade — the very corpus whose owner is
+    # most likely to have configured one by hand — both heat fits used to de-trend with the
+    # shipped 0.40, and the wbgt_a they reported was wrong with nothing to show it.
+    db = _configured(tmp_path, "k_grade = 0.35\nwbgt_ref_c = 21.0\n")
+
+    seen = []
+    monkeypatch.setattr("pacelab.calibrate.fit_k_grade", lambda results: None)
+    monkeypatch.setattr("pacelab.calibrate.fit_wbgt_a",
+                        lambda results, k_grade, wbgt_ref: seen.append((k_grade, wbgt_ref)))
+    monkeypatch.setattr("pacelab.calibrate.fit_hr_conditioned_wbgt_a",
+                        lambda results, k_grade, wbgt_ref: seen.append((k_grade, wbgt_ref)))
+
+    assert main(["calibrate", "--db", str(db)]) == 0
+
+    # Both heat fits, both configured coefficients: the de-trend and the curve's centre.
+    assert seen == [(0.35, 21.0), (0.35, 21.0)]
+
+
+def test_calibrate_writes_nothing(tmp_path, capsys):
+    # Report-only (FR-8.2): reading the configuration must not start writing it.
+    db = _configured(tmp_path, "k_grade = 0.35\n")
+
+    assert main(["calibrate", "--db", str(db)]) == 0
+
+    assert (tmp_path / CONFIG_FILENAME).read_text() == "k_grade = 0.35\n"
+    assert "report only — nothing applied" in capsys.readouterr().out
+
+
+def test_calibrate_reports_an_unreadable_config_rather_than_fitting(tmp_path, capsys):
+    db = _configured(tmp_path, "k_grade = 'steep'\n")
+
+    assert main(["calibrate", "--db", str(db)]) == 1
+
+    captured = capsys.readouterr()
+    assert "'k_grade' must be a number" in captured.err
+    assert "k_grade :" not in captured.out
 
 
 def test_recompute_command_runs_the_pass(tmp_path, capsys, monkeypatch):
