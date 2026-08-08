@@ -134,6 +134,19 @@ def test_a_non_numeric_value_is_an_error_naming_the_key(tmp_path, value):
     assert "k_grade" in str(e.value)
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "+inf"])
+def test_a_non_finite_value_is_an_error_naming_the_key(tmp_path, value):
+    # TOML spells these as float literals, so a plain numeric check admits them. A NaN
+    # coefficient makes every Normalized Pace it touches NaN and still hashes into
+    # model_version, so the corpus gets stamped as if the poison were a legitimate re-tune.
+    db = _write(tmp_path, f"k_grade = {value}\n")
+
+    with pytest.raises(ConfigError) as e:
+        load_config(db)
+
+    assert "k_grade" in str(e.value)
+
+
 def test_malformed_toml_is_an_error_naming_the_file(tmp_path):
     db = _write(tmp_path, "k_grade =\n")
 

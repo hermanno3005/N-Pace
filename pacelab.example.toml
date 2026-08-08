@@ -22,9 +22,10 @@
 # is excluded from the stamp because no model reads it yet.
 
 # --- Reference Conditions ---------------------------------------------------------------
-# The altitude Normalized Pace is expressed at: your home elevation in metres, so running
-# at home in still air incurs no air-density penalty (ADR-0002). A fact about where you
-# run, not a tunable.
+# The altitude Normalized Pace is expressed at: your home elevation in metres (ADR-0002).
+# A fact about where you run, not a tunable. No model reads it yet — it documents the
+# altitude term of the Reference Conditions, and setting it changes no number today. That
+# is why it stays out of the version stamp: it cannot drift the corpus.
 # home_elevation_m = 535.0
 
 # --- Grade (ADR-0007) -------------------------------------------------------------------

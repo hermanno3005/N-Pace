@@ -178,8 +178,8 @@ number (ADR-0021):
 - **The reference altitude** — `home_elevation_m`, a fact about where you run, filling a
   slot in the frozen **Reference Conditions**.
 
-Every key is checked: a misspelling or a non-numeric value fails loudly with the key
-named, and never falls back silently.
+Every key is checked: a misspelling, or a value that is not a finite number, fails loudly
+with the key named, and never falls back silently.
 
 > **The shipped coefficients were fitted to one athlete's corpus**, in one location, over
 > one summer (`docs/research/calibration-findings-2026-07.md`). `wbgt_a` — the scale of

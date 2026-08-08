@@ -12,6 +12,7 @@ an optional ``pacelab.toml`` beside its results database (ADR-0021) — see ``lo
 """
 
 import hashlib
+import math
 import tomllib
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -198,5 +199,10 @@ def _overrides(table: dict, path: Path) -> dict[str, float]:
         # numeric check would accept `k_grade = true` and normalize at 1.0.
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ConfigError(f"{path}: '{key}' must be a number, got {value!r}")
+        # TOML spells `nan` and `inf` as float literals, so the numeric check above admits
+        # them. A non-finite coefficient poisons every cost it touches *and* hashes into
+        # model_version, stamping the corpus with a version derived from the poison.
+        if not math.isfinite(value):
+            raise ConfigError(f"{path}: '{key}' must be finite, got {value!r}")
         overrides[key] = float(value)
     return overrides
