@@ -7,6 +7,7 @@ leaves the corpus alone".
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from test_recompute import (
@@ -22,6 +23,8 @@ from pacelab.recompute import recompute
 from pacelab.report import format_summary
 from pacelab.store import ResultStore
 
+SRC = Path(__file__).resolve().parent.parent / "src" / "pacelab"
+
 #: The seven tunable coefficients, each with a value that is not its shipped default.
 RETUNED = {
     "k_grade": 0.35,
@@ -31,6 +34,16 @@ RETUNED = {
     "heat_a": 0.002,
     "heat_b": 1.4,
     "drag_area_per_mass": 0.006,
+}
+
+#: The settable keys held out of the version stamp, each with the reason it cannot move a
+#: stored number. Restated here rather than imported from `_UNVERSIONED_KEYS`, so that
+#: widening the exemption is a second edit a reviewer sees: the production tuple is the
+#: claim, this is the argument that has to accompany it.
+INERT_KEYS = {
+    "home_elevation_m": "declared on Config to document the altitude term of the Reference "
+                        "Conditions (ADR-0002), and read by no module in the engine — so no "
+                        "stored number can depend on its value (ADR-0021)",
 }
 
 
@@ -78,6 +91,37 @@ def test_changing_any_coefficient_changes_the_stamp(tmp_path, key, value):
 def test_the_seven_coefficients_are_exactly_what_the_digest_covers():
     # A new tunable must enter the digest, and this is where forgetting shows up.
     assert set(VERSIONED_KEYS) == set(RETUNED)
+
+
+def test_the_exemption_from_the_digest_is_exactly_the_declared_inert_set():
+    # The mirror of the test above, on the side the derivation cannot protect. Subtraction
+    # puts a *new* tunable in the digest by default, but a key moved *out* of it leaves
+    # silently: every stored number shifts while `model_version` holds still, so
+    # `needs_recompute` enumerates nothing and the corpus disagrees with itself with no
+    # signal. If you are here because you exempted a key, say above why it cannot reach a
+    # stored number — and if you cannot, it belongs in the digest.
+    assert set(SETTABLE_KEYS) - set(VERSIONED_KEYS) == set(INERT_KEYS)
+
+
+@pytest.mark.parametrize("key", sorted(INERT_KEYS))
+def test_an_inert_key_is_read_nowhere_in_the_engine(key):
+    # "Declared inert" is the claim; this is the property it rests on, checked rather than
+    # restated. A key no module reads cannot change what the engine stores, which is the
+    # whole argument for leaving it out of the stamp. Attribute access rather than the bare
+    # name, so `config.py` is swept like every other module: the first reader is as likely
+    # to be a term derived on `Config` itself as one out in the engine, and excusing the
+    # file that declares the key would blind the guard to exactly that.
+    sources = {path.relative_to(SRC).as_posix(): path.read_text(encoding="utf-8")
+               for path in SRC.rglob("*.py")}
+
+    # The declaration, which both proves the sweep found the source tree — an empty sweep
+    # would otherwise pass having demonstrated nothing — and is the one mention that is not
+    # a read.
+    assert f"{key}: float" in sources["config.py"]
+
+    readers = sorted(name for name, text in sources.items() if f".{key}" in text)
+    assert readers == [], (f"'{key}' is exempt from the version stamp because {INERT_KEYS[key]}"
+                           f" — but it is read in: {readers}")
 
 
 def test_changing_the_reference_altitude_does_not_change_the_stamp(tmp_path):
